@@ -1,0 +1,14 @@
+{
+  "name": "bunny-edge-deploy",
+  "version": "0.0.0",
+  "private": true,
+  "description": "GitHub Action that deploys a static client dir to Bunny Storage and a server entry to Bunny Edge Scripting middleware on a Bunny CDN pull zone",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "license": "MIT"
+}
