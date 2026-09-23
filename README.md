@@ -29,6 +29,7 @@ The action only deploys. Build first, then point it at the output. It creates th
 
 - [What the server entry must look like](docs/server-entry.md): the contract for the file you pass as `server-entry`, usually produced by a framework adapter.
 - [How a deploy works](docs/how-it-works.md): the steps, caching behavior, defaults and costs, rollback, and the limits the action enforces.
+- [Managing the zone](docs/managing-the-zone.md): which settings the action owns, and how to add a custom hostname in the dashboard.
 - [Bunny findings](docs/bunny-findings.md): API facts verified against the docs and on a live account.
 
 One rule worth knowing before the first deploy: Bunny caches a rendered response without a `Cache-Control` header for 30 days and cookies are not part of the cache key, so the app must mark personalized responses `private` or `no-store`.

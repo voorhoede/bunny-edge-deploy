@@ -5,9 +5,9 @@ Reference for what the action does and why. Setup is in the [README](../README.m
 ## Steps
 
 1. **Compatibility check**, before anything is uploaded. Fails with one message per problem. See [server-entry.md](server-entry.md) for the rules.
-2. **Provision or verify** the storage zone, the middleware script and the pull zone by name. Settings that differ are updated. Settings that cannot be changed (storage region, tier, existing replication regions) are reported as drift. A pull zone pointing at a different storage zone fails the run instead of being repointed.
+2. **Provision or verify** the storage zone, the middleware script and the pull zone by name. Missing resources are created with the defaults below. Existing resources are read as they are and never updated; see [managing-the-zone.md](managing-the-zone.md) for the few settings that are verified and the ones that only produce a warning.
 3. **Upload** `client-dir` to storage, skipping files whose SHA-256 matches the one storage reports. Hashed assets go first, then HTML and other files, so new HTML never references a missing file.
-4. **Sync environment** before publishing: variables not in `env` are removed, every secret in `secrets` is set. Secrets on the script that are not in the input are reported and only removed with `prune-secrets: true`.
+4. **Set environment** before publishing: every key in `env` and `secrets` is set or updated on the script. Nothing is removed, so variables and secrets can also live in the dashboard; keys that exist only there are listed in the summary.
 5. **Publish** the server entry as a new script release.
 6. **Purge** the pull zone. Full purge by default, see below.
 7. **Retention**: files that are no longer in `client-dir` stay in storage for `keep-stale-deploys` deploys, then get deleted. The bookkeeping lives in `.bunny-edge-deploy/state.json` in the storage zone; provisioning adds an edge rule that blocks that path on the CDN.
@@ -30,11 +30,13 @@ Server-rendered pages are cached under URLs the action cannot enumerate, so afte
 
 ## Defaults and costs
 
-Storage zone: Frankfurt (`DE`), standard HDD tier at $0.01/GB, no replication. Region and tier cannot be changed after creation, and replication regions cannot be removed, so those are inputs you set once.
+These apply when the action creates a resource. Afterwards the dashboard is the source of truth.
+
+Storage zone: Frankfurt (`DE`), standard HDD tier at $0.01/GB, no replication. Region and tier cannot be changed after creation, and replication regions cannot be removed.
 
 Pull zone: standard tier, Europe only. Visitors elsewhere are served from the nearest European location. Smart Cache off, cache expiry follows the origin, cookies and `Set-Cookie` untouched, no CORS or canonical headers, no Vary variants, error responses not cached, stale served while the origin is offline, HTTPS forced on every hostname, TLS 1.0 and 1.1 off, log IP anonymization on, compression handled by Bunny for text responses.
 
-Everything that costs extra is off. Opt in by changing the zone in the dashboard; the action does not turn these off again but does not manage them either:
+Everything that costs extra is off at creation. Opt in by changing the zone in the dashboard:
 
 | Add-on | Cost | Why off |
 | --- | --- | --- |
@@ -57,7 +59,7 @@ POST https://api.bunny.net/compute/script/<script-id>/publish/<release-uuid>
 AccessKey: <account api key>
 ```
 
-Environment variables and secrets are stored on the script, not on the release. A rollback keeps the current values, so a release that needs an old variable value needs that value set again. Static files are not versioned: rolling back the script does not restore removed files, but files stay in storage for `keep-stale-deploys` deploys, so a rollback within that window still finds its assets.
+Environment variables and secrets are stored on the script, not on the release. A rollback keeps the current values, so a release that needs an old variable value needs that value set again, in the dashboard or through the `env` input. Changes take effect on new isolates within about ten seconds, without a republish. Static files are not versioned: rolling back the script does not restore removed files, but files stay in storage for `keep-stale-deploys` deploys, so a rollback within that window still finds its assets.
 
 ## Limits the action enforces
 

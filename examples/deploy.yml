@@ -36,6 +36,8 @@ jobs:
           client-dir: dist/client
           server-entry: dist/server/entry.js
           bunny-api-key: ${{ secrets.BUNNY_API_KEY }}
+          # Optional: runtime variables and secrets for the script can also be
+          # managed in the Bunny dashboard. Listed keys are set, nothing is removed.
           env: |
             PUBLIC_SITE_URL=https://www.example.com
           secrets: |
