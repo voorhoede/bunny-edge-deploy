@@ -38,6 +38,15 @@ describe("provision on an empty account", () => {
     assert.deepEqual(result.created, ["storage zone site", "script site", "pull zone site"]);
     assert.equal(result.hostname, "site.b-cdn.net");
     assert.deepEqual(result.drift, []);
+    const rule = calls.find((c) => c[0] === "pullZones.addOrUpdateEdgeRule");
+    assert.equal(rule[2].ActionType, 4);
+    assert.deepEqual(rule[2].Triggers[0].PatternMatches, ["*/.bunny-edge-deploy/*"]);
+  });
+
+  it("warns that replication regions cannot be removed when it creates a zone with them", async () => {
+    const { api } = fakeApi();
+    const result = await provision({ api, config: { ...config, replicationRegions: ["UK"] } });
+    assert.ok(result.warnings.some((w) => /UK.*cannot be removed/.test(w)));
   });
 });
 
@@ -45,61 +54,49 @@ describe("provision with existing resources", () => {
   const existing = {
     storageZone: { Id: 11, Name: "site", Region: "DE", ZoneTier: 0, ReplicationRegions: [], Password: "pw", StorageHostname: "storage.bunnycdn.com" },
     script: { Id: 22, Name: "site", ScriptType: 2 },
-    pullZone: { Id: 33, Name: "site", OriginType: 2, StorageZoneId: 11, MiddlewareScriptId: 22, EdgeScriptExecutionPhase: 0, Type: 0, EnableSmartCache: false, CacheControlMaxAgeOverride: 2592000, DisableCookies: true, Hostnames: [{ Value: "site.b-cdn.net", ForceSSL: true, IsSystemHostname: true }, { Value: "www.example.com", ForceSSL: false }] },
+    pullZone: { Id: 33, Name: "site", OriginType: 2, StorageZoneId: 11, MiddlewareScriptId: 22, EdgeScriptExecutionPhase: 0, CacheControlMaxAgeOverride: -1, EnableSmartCache: false, DisableCookies: false, EdgeRules: [{ Description: "bunny-edge-deploy: block deploy state", Enabled: true }], Hostnames: [{ Value: "site.b-cdn.net", ForceSSL: true, IsSystemHostname: true }, { Value: "www.example.com", ForceSSL: false }] },
   };
 
-  it("creates nothing and updates only the pull zone settings that differ", async () => {
+  it("creates nothing, updates nothing, and forces https on hostnames that do not have it yet", async () => {
     const { api, calls, names } = fakeApi(existing);
     const result = await provision({ api, config });
-    assert.deepEqual(names("storageZones.create").concat(names("scripts.create"), names("pullZones.create")), []);
-    const update = calls.find((c) => c[0] === "pullZones.update");
-    assert.equal(update[1], 33);
-    assert.equal(update[2].CacheControlMaxAgeOverride, -1);
-    assert.equal(update[2].DisableCookies, false);
-    assert.equal("StorageZoneId" in update[2], false);
+    assert.deepEqual(names("storageZones.create").concat(names("scripts.create"), names("pullZones.create"), names("pullZones.update"), names("pullZones.addOrUpdateEdgeRule")), []);
+    assert.deepEqual(calls.filter((c) => c[0] === "pullZones.setForceSsl").map((c) => c[2]), ["www.example.com"]);
     assert.deepEqual(result.created, []);
-    assert.ok(result.updated.pullZone.includes("CacheControlMaxAgeOverride"));
+    assert.deepEqual(result.warnings, []);
   });
 
-  it("forces https only on hostnames that do not have it yet", async () => {
-    const { api, calls } = fakeApi(existing);
+  it("attaches the script when the pull zone has no middleware yet, and fails when another script is attached", async () => {
+    const { api, calls } = fakeApi({ ...existing, pullZone: { ...existing.pullZone, MiddlewareScriptId: null } });
     await provision({ api, config });
-    const forced = calls.filter((c) => c[0] === "pullZones.setForceSsl").map((c) => c[2]);
-    assert.deepEqual(forced, ["www.example.com"]);
+    assert.deepEqual(calls.find((c) => c[0] === "pullZones.update").slice(1), [33, { MiddlewareScriptId: 22 }]);
+    const { api: other } = fakeApi({ ...existing, pullZone: { ...existing.pullZone, MiddlewareScriptId: 99 } });
+    await assert.rejects(provision({ api: other, config }), /script 99/);
   });
 
-  it("never updates when nothing differs", async () => {
-    const { api, names } = fakeApi({ ...existing, pullZone: { ...existing.pullZone, ...fullyProvisioned() } });
-    const result = await provision({ api, config });
-    assert.deepEqual(names("pullZones.update"), []);
-    assert.deepEqual(names("pullZones.addOrUpdateEdgeRule"), []);
-    assert.deepEqual(result.updated.pullZone, []);
+  it("fails when the cache expiration override is not 'respect origin', since rendered responses would be cached regardless of their headers", async () => {
+    const { api } = fakeApi({ ...existing, pullZone: { ...existing.pullZone, CacheControlMaxAgeOverride: 2592000 } });
+    await assert.rejects(provision({ api, config }), /Cache Expiration Time.*Respect origin/i);
   });
 
-  it("adds the edge rule that blocks the deploy state path when it is missing", async () => {
-    const { api, calls } = fakeApi(existing);
+  it("warns, without changing anything, when Smart Cache is on, cookies are stripped, the script runs before cache, or the state block rule is missing", async () => {
+    const { api, names } = fakeApi({ ...existing, pullZone: { ...existing.pullZone, EnableSmartCache: true, DisableCookies: true, EdgeScriptExecutionPhase: 2, EdgeRules: [] } });
     const result = await provision({ api, config });
-    const rule = calls.find((c) => c[0] === "pullZones.addOrUpdateEdgeRule");
-    assert.equal(rule[1], 33);
-    assert.equal(rule[2].ActionType, 4);
-    assert.deepEqual(rule[2].Triggers[0].PatternMatches, ["*/.bunny-edge-deploy/*"]);
-    assert.ok(result.updated.pullZone.includes("edge rule: block deploy state"));
+    assert.deepEqual(names("pullZones.update").concat(names("pullZones.addOrUpdateEdgeRule")), []);
+    assert.equal(result.warnings.length, 4);
+    assert.ok(result.warnings.some((w) => /Smart Cache/.test(w)));
+    assert.ok(result.warnings.some((w) => /Set-Cookie/.test(w)));
+    assert.ok(result.warnings.some((w) => /before cache/.test(w)));
+    assert.ok(result.warnings.some((w) => /\.bunny-edge-deploy/.test(w)));
   });
 
-  it("reports drift on the storage zone region and tier, since they cannot be changed, and does not touch them", async () => {
-    const { api, names } = fakeApi({ ...existing, storageZone: { ...existing.storageZone, Region: "NY", ZoneTier: 1 } });
-    const result = await provision({ api, config });
+  it("reports drift on the storage zone region, tier and replication regions and does not touch them", async () => {
+    const { api, names } = fakeApi({ ...existing, storageZone: { ...existing.storageZone, Region: "NY", ZoneTier: 1, ReplicationRegions: ["UK"] } });
+    const result = await provision({ api, config: { ...config, replicationRegions: ["SE"] } });
     assert.deepEqual(names("storageZones.update"), []);
     assert.ok(result.drift.some((d) => /region.*NY.*DE/.test(d)));
     assert.ok(result.drift.some((d) => /tier.*edge.*standard/i.test(d)));
-  });
-
-  it("reports replication regions on the zone that were not asked for, and adds requested ones with an irreversibility warning", async () => {
-    const { api, calls } = fakeApi({ ...existing, storageZone: { ...existing.storageZone, ReplicationRegions: ["UK"] } });
-    const result = await provision({ api, config: { ...config, replicationRegions: ["SE"] } });
-    assert.ok(result.drift.some((d) => /replication.*UK/.test(d)));
-    assert.deepEqual(calls.find((c) => c[0] === "storageZones.update").slice(1), [11, { ReplicationZones: ["UK", "SE"] }]);
-    assert.ok(result.warnings.some((w) => /SE.*cannot be removed/.test(w)));
+    assert.ok(result.drift.some((d) => /replication.*UK.*SE/.test(d)));
   });
 
   it("fails when the script that carries the name is not a middleware script", async () => {
@@ -112,7 +109,3 @@ describe("provision with existing resources", () => {
     await assert.rejects(provision({ api, config }), /storage zone 99/);
   });
 });
-
-function fullyProvisioned() {
-  return { EdgeRules: [{ Description: "bunny-edge-deploy: block deploy state", Enabled: true }], CacheControlMaxAgeOverride: -1, CacheControlPublicMaxAgeOverride: -1, DisableCookies: false, IgnoreQueryStrings: false, EnableGeoZoneEU: true, EnableGeoZoneUS: false, EnableGeoZoneASIA: false, EnableGeoZoneSA: false, EnableGeoZoneAF: false, EnableAccessControlOriginHeader: false, AddCanonicalHeader: false, EnableWebPVary: false, EnableAvifVary: false, EnableCountryCodeVary: false, EnableMobileVary: false, EnableHostnameVary: false, EnableCookieVary: false, CacheErrorResponses: false, UseStaleWhileOffline: true, UseStaleWhileUpdating: false, EnableTLS1: false, EnableTLS1_1: false, EnableOriginShield: false, OptimizerEnabled: false, PermaCacheStorageZoneId: 0, LoggingSaveToStorage: false, LoggingIPAnonymizationEnabled: true, MonthlyBandwidthLimit: 0 };
-}

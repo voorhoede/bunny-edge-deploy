@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { desiredPullZoneSettings, desiredStorageZone, settingsDiff } from "./desired-state.js";
+import { desiredPullZoneSettings, desiredStorageZone } from "./desired-state.js";
 
 describe("desiredStorageZone", () => {
   it("defaults to Frankfurt, standard tier, no replication", () => {
@@ -64,12 +64,5 @@ describe("desiredPullZoneSettings", () => {
   it("disables TLS 1.0 and 1.1", () => {
     assert.equal(settings.EnableTLS1, false);
     assert.equal(settings.EnableTLS1_1, false);
-  });
-});
-
-describe("settingsDiff", () => {
-  it("returns only the keys whose current value differs", () => {
-    const current = { A: 1, B: "x", C: true, D: 5 };
-    assert.deepEqual(settingsDiff(current, { A: 1, B: "y", C: false, D: 5 }), { B: "y", C: false });
   });
 });

@@ -41,7 +41,3 @@ export function desiredPullZoneSettings({ storageZoneId, scriptId, pricingTier =
     MonthlyBandwidthLimit: monthlyBandwidthLimit,
   };
 }
-
-export function settingsDiff(current, desired) {
-  return Object.fromEntries(Object.entries(desired).filter(([key, value]) => current[key] !== value));
-}
