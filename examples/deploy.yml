@@ -1,0 +1,42 @@
+# Example workflow for a site that builds into dist/client and dist/server/entry.js.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One production deploy at a time; a running deploy is never cancelled, since a
+# cancelled upload leaves storage half updated.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      # Optional: with Deno on the PATH the action also measures the script's startup time.
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: v2.x
+      - run: npm ci
+      - run: npm run build
+      - uses: voorhoede/bunny-edge-deploy@main # pin to a commit SHA in your repo
+        with:
+          client-dir: dist/client
+          server-entry: dist/server/entry.js
+          bunny-api-key: ${{ secrets.BUNNY_API_KEY }}
+          env: |
+            PUBLIC_SITE_URL=https://www.example.com
+          secrets: |
+            CMS_TOKEN=${{ secrets.CMS_TOKEN }}
