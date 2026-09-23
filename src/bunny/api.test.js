@@ -138,6 +138,15 @@ describe("pull zones and purge", () => {
     assert.equal(calls[0].method, "POST");
   });
 
+  it("purges the whole zone or a cache tag through purgeCache", async () => {
+    const { client, calls } = api([{ status: 204 }, { status: 204 }]);
+    await client.pullZones.purgeAll(3);
+    await client.pullZones.purgeTag(3, "ssr");
+    assert.equal(calls[0].url, "https://api.bunny.net/pullzone/3/purgeCache");
+    assert.deepEqual(JSON.parse(calls[0].body), {});
+    assert.deepEqual(JSON.parse(calls[1].body), { CacheTag: "ssr" });
+  });
+
   it("forces ssl per hostname", async () => {
     const { client, calls } = api([{ status: 204 }]);
     await client.pullZones.setForceSsl(3, "site.b-cdn.net", true);

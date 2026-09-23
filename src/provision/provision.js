@@ -5,6 +5,9 @@ const TIER_NAMES = ["standard", "edge"];
 // The pull zone API reports the request field EnableWebpVary as EnableWebPVary.
 const RESPONSE_ALIASES = { EnableWebpVary: "EnableWebPVary" };
 
+// The retention state file lives in the storage zone, which the pull zone serves; this rule keeps it private.
+export const STATE_BLOCK_RULE = { Description: "bunny-edge-deploy: block deploy state", ActionType: 4, Enabled: true, TriggerMatchingType: 0, Triggers: [{ Type: 0, PatternMatches: ["*/.bunny-edge-deploy/*"], PatternMatchingType: 0 }] };
+
 export async function provision({ api, config }) {
   const created = [];
   const drift = [];
@@ -14,6 +17,7 @@ export async function provision({ api, config }) {
   const script = await provisionScript({ api, config, created });
   const { pullZone, updated } = await provisionPullZone({ api, config, storageZone, script, created });
   const hostname = await forceHttps({ api, pullZone });
+  await ensureStateBlockRule({ api, pullZone, updated });
 
   return { storageZone, script, pullZone, hostname, created, updated: { pullZone: updated }, drift, warnings };
 }
@@ -74,6 +78,13 @@ async function provisionPullZone({ api, config, storageZone, script, created }) 
   const updated = Object.keys(changes);
   if (updated.length > 0) await api.pullZones.update(pullZone.Id, changes);
   return { pullZone, updated };
+}
+
+async function ensureStateBlockRule({ api, pullZone, updated }) {
+  const rules = pullZone.EdgeRules ?? [];
+  if (rules.some((rule) => rule.Description === STATE_BLOCK_RULE.Description && rule.Enabled)) return;
+  await api.pullZones.addOrUpdateEdgeRule(pullZone.Id, STATE_BLOCK_RULE);
+  updated.push("edge rule: block deploy state");
 }
 
 async function forceHttps({ api, pullZone }) {

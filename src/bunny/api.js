@@ -51,6 +51,7 @@ export function createBunnyApi({ apiKey, fetch = globalThis.fetch, sleep } = {})
       setForceSsl: (id, hostname, forceSsl) => post(`/pullzone/${id}/setForceSSL`, { Hostname: hostname, ForceSSL: forceSsl }),
       addOrUpdateEdgeRule: (id, rule) => post(`/pullzone/${id}/edgerules/addOrUpdate`, rule),
       purgeAll: (id) => post(`/pullzone/${id}/purgeCache`, {}),
+      purgeTag: (id, tag) => post(`/pullzone/${id}/purgeCache`, { CacheTag: tag }),
     },
     storageZones: {
       findByName: findByName("/storagezone"),

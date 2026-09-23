@@ -15,6 +15,7 @@ function fakeApi({ storageZone, pullZone, script } = {}) {
       update: record("pullZones.update"),
       get: record("pullZones.get", { ...(pullZone ?? created.pullZone), Hostnames: (pullZone ?? created.pullZone).Hostnames }),
       setForceSsl: record("pullZones.setForceSsl"),
+      addOrUpdateEdgeRule: record("pullZones.addOrUpdateEdgeRule"),
     },
   };
   return { api, calls, names: (prefix) => calls.map((c) => c[0]).filter((n) => n.startsWith(prefix)) };
@@ -71,7 +72,18 @@ describe("provision with existing resources", () => {
     const { api, names } = fakeApi({ ...existing, pullZone: { ...existing.pullZone, ...fullyProvisioned() } });
     const result = await provision({ api, config });
     assert.deepEqual(names("pullZones.update"), []);
+    assert.deepEqual(names("pullZones.addOrUpdateEdgeRule"), []);
     assert.deepEqual(result.updated.pullZone, []);
+  });
+
+  it("adds the edge rule that blocks the deploy state path when it is missing", async () => {
+    const { api, calls } = fakeApi(existing);
+    const result = await provision({ api, config });
+    const rule = calls.find((c) => c[0] === "pullZones.addOrUpdateEdgeRule");
+    assert.equal(rule[1], 33);
+    assert.equal(rule[2].ActionType, 4);
+    assert.deepEqual(rule[2].Triggers[0].PatternMatches, ["*/.bunny-edge-deploy/*"]);
+    assert.ok(result.updated.pullZone.includes("edge rule: block deploy state"));
   });
 
   it("reports drift on the storage zone region and tier, since they cannot be changed, and does not touch them", async () => {
@@ -102,5 +114,5 @@ describe("provision with existing resources", () => {
 });
 
 function fullyProvisioned() {
-  return { CacheControlMaxAgeOverride: -1, CacheControlPublicMaxAgeOverride: -1, DisableCookies: false, IgnoreQueryStrings: false, EnableGeoZoneEU: true, EnableGeoZoneUS: false, EnableGeoZoneASIA: false, EnableGeoZoneSA: false, EnableGeoZoneAF: false, EnableAccessControlOriginHeader: false, AddCanonicalHeader: false, EnableWebPVary: false, EnableAvifVary: false, EnableCountryCodeVary: false, EnableMobileVary: false, EnableHostnameVary: false, EnableCookieVary: false, CacheErrorResponses: false, UseStaleWhileOffline: true, UseStaleWhileUpdating: false, EnableTLS1: false, EnableTLS1_1: false, EnableOriginShield: false, OptimizerEnabled: false, PermaCacheStorageZoneId: 0, LoggingSaveToStorage: false, LoggingIPAnonymizationEnabled: true, MonthlyBandwidthLimit: 0 };
+  return { EdgeRules: [{ Description: "bunny-edge-deploy: block deploy state", Enabled: true }], CacheControlMaxAgeOverride: -1, CacheControlPublicMaxAgeOverride: -1, DisableCookies: false, IgnoreQueryStrings: false, EnableGeoZoneEU: true, EnableGeoZoneUS: false, EnableGeoZoneASIA: false, EnableGeoZoneSA: false, EnableGeoZoneAF: false, EnableAccessControlOriginHeader: false, AddCanonicalHeader: false, EnableWebPVary: false, EnableAvifVary: false, EnableCountryCodeVary: false, EnableMobileVary: false, EnableHostnameVary: false, EnableCookieVary: false, CacheErrorResponses: false, UseStaleWhileOffline: true, UseStaleWhileUpdating: false, EnableTLS1: false, EnableTLS1_1: false, EnableOriginShield: false, OptimizerEnabled: false, PermaCacheStorageZoneId: 0, LoggingSaveToStorage: false, LoggingIPAnonymizationEnabled: true, MonthlyBandwidthLimit: 0 };
 }

@@ -49,6 +49,14 @@ export function createStorageClient({ hostname, zoneName, password, fetch = glob
       const checksum = createHash("sha256").update(bytes).digest("hex").toUpperCase();
       await send("PUT", path, { headers: { "Content-Type": contentType, Checksum: checksum }, body: bytes });
     },
+    download: async (path) => {
+      try {
+        return Buffer.from(await (await send("GET", path)).arrayBuffer());
+      } catch (error) {
+        if (error.status === 404) return undefined;
+        throw error;
+      }
+    },
     remove: async (path) => {
       await send("DELETE", path);
     },

@@ -9,8 +9,8 @@ function fakeFetch(responses) {
     calls.push({ url: String(url), method: init.method ?? "GET", headers: new Headers(init.headers), body: init.body });
     const next = responses.shift();
     if (!next) throw new Error(`unexpected request ${init.method} ${url}`);
-    const { status = 200, json } = next;
-    return new Response(json !== undefined ? JSON.stringify(json) : null, { status });
+    const { status = 200, json, text } = next;
+    return new Response(json !== undefined ? JSON.stringify(json) : text ?? null, { status });
   };
   return { fetch, calls };
 }
@@ -80,6 +80,15 @@ describe("storage list", () => {
   it("treats a 404 on the root as an empty zone", async () => {
     const { client } = storage([{ status: 404, json: [{ HttpCode: 404, Message: "Not found" }] }]);
     assert.deepEqual(await client.listAll(), []);
+  });
+});
+
+describe("storage download", () => {
+  it("returns the bytes, or undefined when the file does not exist", async () => {
+    const { client, calls } = storage([{ status: 200, text: "{}" }, { status: 404 }]);
+    assert.equal((await client.download("state.json")).toString(), "{}");
+    assert.equal(calls[0].method, "GET");
+    assert.equal(await client.download("missing.json"), undefined);
   });
 });
 
