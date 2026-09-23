@@ -1,0 +1,102 @@
+name: Bunny Edge Deploy
+description: Deploy a built website to Bunny.net. Static files go to Bunny Storage behind a CDN pull zone, one server file runs as a middleware edge script.
+author: De Voorhoede
+branding:
+  icon: upload-cloud
+  color: orange
+
+inputs:
+  client-dir:
+    description: Directory with the static build output, uploaded to the storage zone.
+    required: true
+  server-entry:
+    description: Path to the single self-contained ESM file deployed as the middleware edge script.
+    required: true
+  bunny-api-key:
+    description: Bunny.net account API key. Pass it as a secret.
+    required: true
+  env:
+    description: Runtime environment variables for the edge script, one KEY=value per line. Variables on the script that are not listed here are removed.
+    default: ""
+  secrets:
+    description: Encrypted secrets for the edge script, one KEY=value per line. Values are masked in logs and never read back.
+    default: ""
+  prune-secrets:
+    description: Also remove secrets on the script that are not listed in `secrets`.
+    default: "false"
+  name:
+    description: Base name for the storage zone, pull zone and script. Defaults to the repository name, lowercased, with anything outside a-z, 0-9 and dashes replaced by a dash. The pull zone name becomes the `<name>.b-cdn.net` hostname and must be unique across Bunny.
+    default: ""
+  storage-zone-name:
+    description: Overrides the storage zone name.
+    default: ""
+  pull-zone-name:
+    description: Overrides the pull zone name.
+    default: ""
+  script-name:
+    description: Overrides the edge script name.
+    default: ""
+  storage-region:
+    description: Main storage region code. DE is Frankfurt. Cannot be changed after creation.
+    default: DE
+  storage-tier:
+    description: "`standard` (HDD, $0.01/GB) or `edge` (SSD, $0.02/GB, requires DE). Cannot be changed after creation."
+    default: standard
+  replication-regions:
+    description: Comma-separated replication region codes. Each region costs extra and cannot be removed after it is added.
+    default: ""
+  pricing-tier:
+    description: "`standard` (full network, EU $0.01/GB) or `volume` (10 PoPs, no Amsterdam, $0.005/GB)."
+    default: standard
+  pricing-regions:
+    description: Comma-separated CDN pricing regions to enable, from EU, US, ASIA, SA, AF. Visitors in a disabled region are served from the nearest enabled one.
+    default: EU
+  monthly-bandwidth-limit-gb:
+    description: Monthly bandwidth limit in GB as a cost guard. 0 means unlimited. The zone stops serving when the limit is reached.
+    default: "0"
+  stale-while-updating:
+    description: Serve the cached response while a fresh one is fetched in the background. Serves the previous version once after each purge.
+    default: "false"
+  script-size-limit-mb:
+    description: Fail when the server entry is larger than this. Bunny documents 10 MB, but scripts of 9.5 MB and up failed to boot reliably in testing.
+    default: "8"
+  startup-limit-ms:
+    description: Fail when importing the server entry in a local Deno harness takes longer than this. Only runs when `deno` is on the PATH.
+    default: "500"
+  keep-stale-deploys:
+    description: Files no longer in `client-dir` are deleted from storage after this many deploys, so open tabs can still load old chunks.
+    default: "3"
+  purge:
+    description: "`full` purges the whole zone after publishing. `targeted` purges changed unhashed files plus `cache-tag`, and is only correct when the app sets that tag with a CDN-Tag header on every rendered response."
+    default: full
+  cache-tag:
+    description: CDN-Tag value to purge in targeted mode.
+    default: ""
+  smoke-route:
+    description: Server-rendered route requested by the smoke test after the deploy.
+    default: /
+  smoke-static-path:
+    description: Static file path requested by the smoke test. Defaults to the first hashed asset in `client-dir`.
+    default: ""
+  concurrency:
+    description: Parallel storage uploads.
+    default: "8"
+  release-note:
+    description: Note stored on the published script release. Defaults to repository, commit and run number.
+    default: ""
+
+outputs:
+  hostname:
+    description: The pull zone system hostname, `<name>.b-cdn.net`.
+  release:
+    description: UUID of the published script release, usable for rollback.
+  pull-zone-id:
+    description: Bunny pull zone ID.
+  storage-zone-id:
+    description: Bunny storage zone ID.
+  script-id:
+    description: Bunny edge script ID.
+
+runs:
+  using: node24
+  main: src/main.js
