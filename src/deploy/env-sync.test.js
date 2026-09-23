@@ -15,20 +15,19 @@ const desired = { variables: [{ name: "A", value: "1" }, { name: "B", value: "ne
 const remote = { variables: [{ id: 1, name: "A", value: "1" }, { id: 2, name: "B", value: "old" }, { id: 3, name: "OLD", value: "x" }], secrets: [{ id: 10, name: "S" }, { id: 11, name: "GONE" }] };
 
 describe("syncEnvironment", () => {
-  it("upserts added and changed variables, removes variables not in the input, and upserts every secret", async () => {
+  it("sets added and changed variables and every listed secret, removes nothing, and reports what is on the script but not in the input", async () => {
     const { scripts, calls } = fakeScripts(remote);
     const result = await syncEnvironment({ scripts, scriptId: 5, desired });
-    assert.deepEqual(calls, [["var", "B"], ["delvar", 3], ["secret", "S"]]);
-    assert.deepEqual(result.variables, { added: [], changed: ["B"], unchanged: ["A"], removed: ["OLD"] });
-    assert.deepEqual(result.secrets, { added: [], updated: ["S"], removed: [] });
-    assert.deepEqual(result.secretsLeft, ["GONE"]);
+    assert.deepEqual(calls, [["var", "B"], ["secret", "S"]]);
+    assert.deepEqual(result.variables, { added: [], changed: ["B"], unchanged: ["A"] });
+    assert.deepEqual(result.secrets, { added: [], updated: ["S"] });
+    assert.deepEqual(result.notInInput, { variables: ["OLD"], secrets: ["GONE"] });
   });
 
-  it("removes secrets not in the input only when pruneSecrets is set", async () => {
+  it("only lists when the input is empty", async () => {
     const { scripts, calls } = fakeScripts(remote);
-    const result = await syncEnvironment({ scripts, scriptId: 5, desired, pruneSecrets: true });
-    assert.ok(calls.some((c) => c[0] === "delsecret" && c[1] === 11));
-    assert.deepEqual(result.secrets.removed, ["GONE"]);
-    assert.deepEqual(result.secretsLeft, []);
+    const result = await syncEnvironment({ scripts, scriptId: 5, desired: { variables: [], secrets: [] } });
+    assert.deepEqual(calls, []);
+    assert.deepEqual(result.notInInput, { variables: ["A", "B", "OLD"], secrets: ["S", "GONE"] });
   });
 });

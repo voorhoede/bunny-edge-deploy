@@ -13,7 +13,6 @@ export const INPUT_SCHEMA = {
   "bunny-api-key": { required: true },
   env: { type: "multiline", default: "" },
   secrets: { type: "multiline", default: "" },
-  "prune-secrets": { type: "boolean", default: false },
   name: { default: "" },
   "storage-zone-name": { default: "" },
   "pull-zone-name": { default: "" },
@@ -66,7 +65,6 @@ export async function run({
   const provisioned = await actions.group("Provision", async () => {
     const result = await provision({ api, config });
     for (const item of result.created) actions.info(`created ${item}`);
-    for (const key of result.updated.pullZone) actions.info(`updated pull zone: ${key}`);
     for (const warning of result.warnings) actions.warning(warning);
     for (const item of result.drift) actions.warning(`drift: ${item}`);
     return result;
@@ -78,14 +76,15 @@ export async function run({
     api, storage, log: actions.info,
     clientDir: options["client-dir"], serverEntry: options["server-entry"],
     pullZone: provisioned.pullZone, hostname: provisioned.hostname, scriptId: provisioned.script.Id,
-    environment: { variables: environment.variables, secrets: environment.secrets }, pruneSecrets: options["prune-secrets"],
+    environment: { variables: environment.variables, secrets: environment.secrets },
     keepStaleDeploys: options["keep-stale-deploys"], concurrency: options.concurrency,
     purge: options.purge, cacheTag: options["cache-tag"] || undefined,
     serverRoute: options["smoke-route"], smokeStaticPath: options["smoke-static-path"] || undefined,
     note: options["release-note"] || `${env.GITHUB_REPOSITORY ?? "bunny-edge-deploy"}@${(env.GITHUB_SHA ?? "").slice(0, 7)} run ${env.GITHUB_RUN_NUMBER ?? ""}`.trim(),
   }));
   for (const warning of result.smoke.warnings) actions.warning(warning);
-  for (const name of result.environment.secretsLeft) actions.warning(`secret "${name}" exists on the script but is not in the secrets input; set prune-secrets to remove it`);
+  const onlyOnScript = [...result.environment.notInInput.variables, ...result.environment.notInInput.secrets];
+  if (onlyOnScript.length > 0) actions.info(`on the script but not in the workflow: ${onlyOnScript.join(", ")}`);
 
   await actions.setOutput("hostname", provisioned.hostname);
   await actions.setOutput("release", result.release);
@@ -127,13 +126,13 @@ function summary({ provisioned, result, compat }) {
     "",
     `### Files\n- uploaded ${result.uploaded.length}, unchanged ${result.unchanged.length}, stale ${result.stale.length}, removed ${result.removed.length}`,
     "",
-    `### Environment\n- variables: ${result.environment.variables.added.length} added, ${result.environment.variables.changed.length} changed, ${result.environment.variables.removed.length} removed\n- secrets: ${result.environment.secrets.added.length} added, ${result.environment.secrets.updated.length} updated, ${result.environment.secrets.removed.length} removed`,
+    `### Environment\n- variables: ${result.environment.variables.added.length} added, ${result.environment.variables.changed.length} changed\n- secrets: ${result.environment.secrets.added.length} added, ${result.environment.secrets.updated.length} updated\n- on the script but not in the workflow: ${[...result.environment.notInInput.variables, ...result.environment.notInInput.secrets].join(", ") || "none"}`,
     "",
     "### Smoke test",
     result.smoke.checks.map((c) => `- ${c.kind} \`${c.path}\`: ${c.status}, Cache-Control \`${c.cacheControl ?? "none"}\``).join("\n"),
     "",
     "### Provisioning",
-    list([...provisioned.created.map((c) => `created ${c}`), ...provisioned.updated.pullZone.map((u) => `updated ${u}`), ...provisioned.drift.map((d) => `drift: ${d}`)]),
+    list([...provisioned.created.map((c) => `created ${c}`), ...provisioned.drift.map((d) => `drift: ${d}`)]),
     "",
     compat.warnings.length > 0 ? `### Warnings\n${list(compat.warnings)}\n` : "",
   ].join("\n");

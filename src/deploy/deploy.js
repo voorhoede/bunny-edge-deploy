@@ -13,7 +13,7 @@ export const STATE_PATH = ".bunny-edge-deploy/state.json";
 export async function deploy({
   api, storage, fetch, log = () => {},
   clientDir, serverEntry, pullZone, hostname, scriptId,
-  environment, pruneSecrets = false,
+  environment,
   keepStaleDeploys = 3, concurrency = 8,
   purge = "full", cacheTag,
   serverRoute = "/", smokeStaticPath, smokeRetryForMs, note, sleep,
@@ -25,7 +25,7 @@ export async function deploy({
   await inBatches(plan.upload.filter((f) => isHashedAsset(f.path)), concurrency, (file) => storage.upload(file.path, file.bytes, { contentType: contentTypeFor(file.path) }));
   await inBatches(plan.upload.filter((f) => !isHashedAsset(f.path)), concurrency, (file) => storage.upload(file.path, file.bytes, { contentType: contentTypeFor(file.path) }));
 
-  const env = await syncEnvironment({ scripts: api.scripts, scriptId, desired: environment, pruneSecrets });
+  const env = await syncEnvironment({ scripts: api.scripts, scriptId, desired: environment });
   log(`environment synced: ${summarize(env)}`);
 
   await api.scripts.uploadCode(scriptId, await readFile(serverEntry, "utf8"));
@@ -84,4 +84,4 @@ async function inBatches(items, size, work) {
   await Promise.all(workers);
 }
 
-const summarize = (env) => `${env.variables.added.length} added, ${env.variables.changed.length} changed, ${env.variables.removed.length} removed, ${env.secrets.added.length + env.secrets.updated.length} secrets set`;
+const summarize = (env) => `${env.variables.added.length} added, ${env.variables.changed.length} changed, ${env.secrets.added.length + env.secrets.updated.length} secrets set, ${env.notInInput.variables.length + env.notInInput.secrets.length} on the script only`;

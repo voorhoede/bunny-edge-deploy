@@ -23,8 +23,8 @@ function harness({ inputs = {} } = {}) {
     group: async (name, fn) => { lines.push(`group:${name}`); return fn(); }, setOutput: async (k, v) => { outputs[k] = v; }, summary: async (md) => lines.push(`summary:${md.length}`),
   };
   const deps = {
-    provision: async (args) => { calls.push(["provision", args.config]); return { storageZone: { Id: 1, Name: "n", Password: "pw", StorageHostname: "storage.bunnycdn.com" }, script: { Id: 2 }, pullZone: { Id: 3 }, hostname: "n.b-cdn.net", created: ["storage zone n"], updated: { pullZone: [] }, drift: [], warnings: [] }; },
-    deploy: async (args) => { calls.push(["deploy", { environment: args.environment, keepStaleDeploys: args.keepStaleDeploys, purge: args.purge }]); return { uploaded: ["index.html"], unchanged: [], stale: [], removed: [], release: "rel", environment: { variables: { added: ["A"], changed: [], unchanged: [], removed: [] }, secrets: { added: ["S"], updated: [], removed: [] }, secretsLeft: [] }, smoke: { checks: [], errors: [], warnings: [] } }; },
+    provision: async (args) => { calls.push(["provision", args.config]); return { storageZone: { Id: 1, Name: "n", Password: "pw", StorageHostname: "storage.bunnycdn.com" }, script: { Id: 2 }, pullZone: { Id: 3 }, hostname: "n.b-cdn.net", created: ["storage zone n"], drift: [], warnings: [] }; },
+    deploy: async (args) => { calls.push(["deploy", { environment: args.environment, keepStaleDeploys: args.keepStaleDeploys, purge: args.purge }]); return { uploaded: ["index.html"], unchanged: [], stale: [], removed: [], release: "rel", environment: { variables: { added: ["A"], changed: [], unchanged: [] }, secrets: { added: ["S"], updated: [] }, notInInput: { variables: [], secrets: [] } }, smoke: { checks: [], errors: [], warnings: [] } }; },
     probeServerEntry: async () => ({ skipped: true, notice: "deno missing", errors: [] }),
     createBunnyApi: () => ({}),
     createStorageClient: () => ({}),

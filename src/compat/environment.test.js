@@ -44,10 +44,11 @@ describe("diffEnvironment", () => {
     secrets: [{ id: 10, name: "S" }, { id: 11, name: "GONE" }],
   };
 
-  it("reports added, changed, unchanged and removed variables and added, updated and removed secrets by name only", () => {
+  it("reports added, changed and unchanged variables, added and updated secrets, and what exists only on the script, by name only", () => {
     const diff = diffEnvironment(desired, remote);
-    assert.deepEqual(diff.variables, { added: ["N"], changed: ["B"], unchanged: ["A"], removed: ["OLD"] });
-    assert.deepEqual(diff.secrets, { added: ["T"], updated: ["S"], removed: ["GONE"] });
+    assert.deepEqual(diff.variables, { added: ["N"], changed: ["B"], unchanged: ["A"] });
+    assert.deepEqual(diff.secrets, { added: ["T"], updated: ["S"] });
+    assert.deepEqual(diff.notInInput, { variables: ["OLD"], secrets: ["GONE"] });
     assert.ok(!JSON.stringify(diff).includes("shh"));
   });
 });

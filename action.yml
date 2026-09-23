@@ -16,14 +16,11 @@ inputs:
     description: Bunny.net account API key. Pass it as a secret.
     required: true
   env:
-    description: Runtime environment variables for the edge script, one KEY=value per line. Variables on the script that are not listed here are removed.
+    description: Runtime environment variables to set on the edge script, one KEY=value per line. Only listed keys are set or updated; nothing is removed. Variables can also be managed in the Bunny dashboard.
     default: ""
   secrets:
-    description: Encrypted secrets for the edge script, one KEY=value per line. Values are masked in logs and never read back.
+    description: Encrypted secrets to set on the edge script, one KEY=value per line. Only listed keys are set; nothing is removed. Values are masked in logs and never read back.
     default: ""
-  prune-secrets:
-    description: Also remove secrets on the script that are not listed in `secrets`.
-    default: "false"
   name:
     description: Base name for the storage zone, pull zone and script. Defaults to the repository name, lowercased, with anything outside a-z, 0-9 and dashes replaced by a dash. The pull zone name becomes the `<name>.b-cdn.net` hostname and must be unique across Bunny.
     default: ""
@@ -37,25 +34,25 @@ inputs:
     description: Overrides the edge script name.
     default: ""
   storage-region:
-    description: Main storage region code. DE is Frankfurt. Cannot be changed after creation.
+    description: Main storage region code, used when the storage zone is created. DE is Frankfurt. Cannot be changed afterwards.
     default: DE
   storage-tier:
-    description: "`standard` (HDD, $0.01/GB) or `edge` (SSD, $0.02/GB, requires DE). Cannot be changed after creation."
+    description: "`standard` (HDD, $0.01/GB) or `edge` (SSD, $0.02/GB, requires DE), used when the storage zone is created. Cannot be changed afterwards."
     default: standard
   replication-regions:
-    description: Comma-separated replication region codes. Each region costs extra and cannot be removed after it is added.
+    description: Comma-separated replication region codes, used when the storage zone is created. Each region costs extra and cannot be removed after it is added.
     default: ""
   pricing-tier:
-    description: "`standard` (full network, EU $0.01/GB) or `volume` (10 PoPs, no Amsterdam, $0.005/GB)."
+    description: "`standard` (full network, EU $0.01/GB) or `volume` (10 PoPs, no Amsterdam, $0.005/GB), used when the pull zone is created. Change it in the dashboard afterwards."
     default: standard
   pricing-regions:
-    description: Comma-separated CDN pricing regions to enable, from EU, US, ASIA, SA, AF. Visitors in a disabled region are served from the nearest enabled one.
+    description: Comma-separated CDN pricing regions to enable when the pull zone is created, from EU, US, ASIA, SA, AF. Visitors in a disabled region are served from the nearest enabled one. Change them in the dashboard afterwards.
     default: EU
   monthly-bandwidth-limit-gb:
-    description: Monthly bandwidth limit in GB as a cost guard. 0 means unlimited. The zone stops serving when the limit is reached.
+    description: Monthly bandwidth limit in GB as a cost guard, set when the pull zone is created. 0 means unlimited. The zone stops serving when the limit is reached.
     default: "0"
   stale-while-updating:
-    description: Serve the cached response while a fresh one is fetched in the background. Serves the previous version once after each purge.
+    description: Serve the cached response while a fresh one is fetched in the background, set when the pull zone is created. Serves the previous version once after each purge.
     default: "false"
   script-size-limit-mb:
     description: Fail when the server entry is larger than this. Bunny documents 10 MB, but scripts of 9.5 MB and up failed to boot reliably in testing.

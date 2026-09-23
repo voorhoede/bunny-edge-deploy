@@ -35,22 +35,22 @@ function parseLines(text, input, errors) {
 
 export function diffEnvironment(desired, remote) {
   const remoteVariables = new Map(remote.variables.map((v) => [v.name, v]));
-  const variables = { added: [], changed: [], unchanged: [], removed: [] };
+  const variables = { added: [], changed: [], unchanged: [] };
   for (const { name, value } of desired.variables) {
     const current = remoteVariables.get(name);
     if (!current) variables.added.push(name);
     else if (current.value !== value) variables.changed.push(name);
     else variables.unchanged.push(name);
   }
-  const desiredVariableNames = new Set(desired.variables.map((v) => v.name));
-  variables.removed = remote.variables.map((v) => v.name).filter((name) => !desiredVariableNames.has(name));
-
   const remoteSecretNames = new Set(remote.secrets.map((s) => s.name));
-  const desiredSecretNames = new Set(desired.secrets.map((s) => s.name));
   const secrets = {
     added: desired.secrets.map((s) => s.name).filter((name) => !remoteSecretNames.has(name)),
     updated: desired.secrets.map((s) => s.name).filter((name) => remoteSecretNames.has(name)),
-    removed: remote.secrets.map((s) => s.name).filter((name) => !desiredSecretNames.has(name)),
   };
-  return { variables, secrets };
+  const desiredNames = new Set([...desired.variables, ...desired.secrets].map((entry) => entry.name));
+  const notInInput = {
+    variables: remote.variables.map((v) => v.name).filter((name) => !desiredNames.has(name)),
+    secrets: remote.secrets.map((s) => s.name).filter((name) => !desiredNames.has(name)),
+  };
+  return { variables, secrets, notInInput };
 }
