@@ -36,19 +36,20 @@ describe("analyzeServerEntry static checks", () => {
     assert.match(errors[0], /\.\/render\.js/);
   });
 
-  it("errors on bare package imports, allows npm:, https: and documented node: modules", async () => {
-    const source = `import react from "react";\nimport fs from "node:fs/promises";\nimport process from "node:process";\nimport tls from "node:tls";\nimport sdk from "https://esm.sh/@bunny.net/edgescript-sdk@0.12.1";\n${ok}`;
+  it("errors on bare package imports, allows npm:, https: and node: modules verified on the runtime", async () => {
+    const source = `import react from "react";\nimport fs from "node:fs/promises";\nimport { createHash } from "node:crypto";\nimport zlib from "node:zlib";\nimport sdk from "https://esm.sh/@bunny.net/edgescript-sdk@0.12.1";\n${ok}`;
     const { errors, warnings } = await analyzeServerEntry({ path: await entryFile(source), sizeLimit: 1e7 });
     assert.equal(errors.length, 1);
     assert.match(errors[0], /bare import "react"/);
     assert.deepEqual(warnings, []);
   });
 
-  it("warns on node: modules the Bunny docs do not list", async () => {
-    const source = `import { createHash } from "node:crypto";\n${ok}`;
+  it("errors on node: modules that do not resolve on the runtime and warns on unverified ones", async () => {
+    const source = `import { execSync } from "node:child_process";\nimport { DatabaseSync } from "node:sqlite";\n${ok}`;
     const { errors, warnings } = await analyzeServerEntry({ path: await entryFile(source), sizeLimit: 1e7 });
-    assert.deepEqual(errors, []);
-    assert.match(warnings[0], /node:crypto/);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /node:child_process.*does not resolve/);
+    assert.match(warnings[0], /node:sqlite.*not been verified/);
   });
 
   it("ignores import-like text inside strings and comments, and reports syntax errors", async () => {

@@ -36,6 +36,12 @@ Sources: official OpenAPI specs (`https://core-api-public-docs.b-cdn.net/docs/v3
 - On the Bunny runtime `servePullZone()` calls `Bunny.v1.registerMiddlewares({ onOriginRequest: [...], onOriginResponse: [...] })`; standalone `serve()` calls `Bunny.v1.serve(handler)`. A local Deno harness that stubs `globalThis.Bunny` imports a 13 KB bundle in ~2-12 ms; a 320 KB bundle with a 10,000-path manifest in ~9 ms.
 - Each cache MISS may hit a different isolate (boot id changed between consecutive requests).
 
+### Node compatibility (probed from a deployed middleware script)
+- Runtime reports Deno 2.7.12, V8 14.7, Node compat `process.version` v24.2.0.
+- `node:` modules that import and pass a functional call: assert, async_hooks, buffer, console, crypto (createHash), diagnostics_channel, dns (resolve4 works), dns/promises, domain, events, fs and fs/promises (write and read under /tmp), http, http2, https, module, net, os (`linux`), path, path/posix, perf_hooks, process, punycode, querystring, readline, readline/promises, stream, stream/promises, stream/web, string_decoder, timers, timers/promises, tls, url, util, util/types, zlib (gzip round trip).
+- Fail with "failed to resolve module": child_process, cluster, constants, dgram, inspector, repl, sys, trace_events, tty, v8, vm, wasi, worker_threads.
+- Not tested: sea, sqlite, test. Globals present: Buffer, process, global, setImmediate, caches, HTMLRewriter, Deno, Bunny, WebSocket, URLPattern, CompressionStream, BroadcastChannel, WebAssembly, navigator; `crypto.subtle.digest` works.
+
 ### Environment variables and secrets
 - API accepts values up to 4096 bytes and more than 128 variables, but the script then fails to boot and every request, including static files, returns 400 with an empty body.
 - Effective boot limits: value ≤ 2048 bytes (2049 breaks), ≤ 128 variables (129 breaks). Secrets do not count toward the 128 (128 variables + 2 secrets boots).

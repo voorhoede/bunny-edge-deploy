@@ -49,7 +49,13 @@ Errors fail the workflow before anything is uploaded:
 - no `servePullZone(...).onOriginRequest(...)` in the source;
 - when Deno is on the PATH: importing the file in a harness with a stubbed `Bunny` global throws, registers no request middleware, or takes longer than `startup-limit-ms` (default 500 ms). This is a local approximation of Bunny's startup limit.
 
-Warnings: larger than 2 MB (cold starts measured at 0.5 s and up), and `node:` modules other than the four Bunny documents (`node:process`, `node:fs`, `node:fs/promises`, `node:tls`).
+- `node:` modules that do not resolve on the runtime: child_process, cluster, constants, dgram, inspector, repl, sys, trace_events, tty, v8, vm, wasi, worker_threads.
+
+Warnings: larger than 2 MB (cold starts measured at 0.5 s and up), and `node:` modules not yet verified on the runtime (sea, sqlite, test).
+
+## Node modules verified on the runtime
+
+Imported from a deployed script on Deno 2.7 with Node compat reporting v24.2: assert, async_hooks, buffer, console, crypto, diagnostics_channel, dns, dns/promises, domain, events, fs, fs/promises, http, http2, https, module, net, os, path, path/posix, perf_hooks, process, punycode, querystring, readline, readline/promises, stream, stream/promises, stream/web, string_decoder, timers, timers/promises, tls, url, util, util/types, zlib. Globals present: Buffer, process, caches, HTMLRewriter, WebSocket, URLPattern, CompressionStream, WebAssembly, crypto.subtle. Bunny only documents process, fs, fs/promises and tls, so treat the rest as observed rather than promised.
 
 ## Runtime limits
 
