@@ -42,6 +42,7 @@ function harness() {
     mask: (v) => lines.push(`mask:${v}`), info: (m) => lines.push(m), warning: (m) => lines.push(`warning:${m}`), error: (m) => lines.push(`error:${m}`),
     group: async (name, fn) => { lines.push(`group:${name}`); return fn(); }, setOutput: async (k, v) => { outputs[k] = v; }, summary: async (md) => lines.push(`summary:${md.length}`),
   };
+  const deployments = [];
   const deps = {
     provision: async (args) => {
       calls.push(["provision", { config: args.config, pullZoneRequirements: args.pullZoneRequirements }]);
@@ -62,8 +63,12 @@ function harness() {
     probeScript: async () => ({ skipped: true, notice: "deno missing", errors: [] }),
     createBunnyApi: () => ({}),
     createStorageClient: () => ({}),
+    openDeployment: async (args) => {
+      deployments.push(["open", { environment: args.environment, token: args.token }]);
+      return { succeed: async (result) => deployments.push(["succeed", result]), fail: async (message) => deployments.push(["fail", message]) };
+    },
   };
-  return { actions, deps, calls, lines, outputs };
+  return { actions, deps, calls, lines, outputs, deployments };
 }
 
 describe("run", () => {
@@ -180,6 +185,21 @@ describe("run", () => {
     const { actions, deps, lines } = harness();
     await run({ inputs: { "build-manifest": path, "bunny-api-key": "key", env: 'A="1"' }, actions, ...deps });
     assert.ok(lines.some((l) => /warning:.*env A.*quotes/.test(l)));
+  });
+
+  it("records the deploy in the workflow's GitHub environment, and closes it as live with the site's address", async () => {
+    const path = await project();
+    const { actions, deps, deployments } = harness();
+    await run({ inputs: { "build-manifest": path, "bunny-api-key": "key", "github-token": "tok" }, actions, ...deps });
+    assert.deepEqual(deployments, [["open", { environment: "production", token: "tok" }], ["succeed", { url: "https://n.b-cdn.net", deployId: "689f0795086f" }]]);
+  });
+
+  it("closes the record as failed when the deploy fails, and still fails the run", async () => {
+    const path = await staticProject();
+    const { actions, deps, deployments } = harness();
+    deps.deployStatic = async () => { throw new Error("smoke test failed:\nroute / returned 500"); };
+    await assert.rejects(run({ inputs: { "build-manifest": path, "bunny-api-key": "key", "github-environment": "staging" }, actions, ...deps }), /smoke test failed/);
+    assert.deepEqual(deployments, [["open", { environment: "staging", token: "" }], ["fail", "smoke test failed:\nroute / returned 500"]]);
   });
 
   it("derives the resource name from the repository when no name is given", async () => {

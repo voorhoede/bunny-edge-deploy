@@ -4,6 +4,8 @@ Reference for what the action does and why. Setup is in the [README](../README.m
 
 ## Steps
 
+Every run is recorded in the `github-environment` (default `production`) when the job has `deployments: write`: in progress from the start, then live with the site's address, or failed.
+
 Both kinds of build:
 
 1. **Compatibility check**, before anything is uploaded. Fails with one message per problem. See [build-manifest.md](build-manifest.md) for the rules.

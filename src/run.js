@@ -6,6 +6,7 @@ import { analyzeAssetsDir } from "./compat/assets-dir.js";
 import { parseEnvironment } from "./compat/environment.js";
 import { analyzeScript, probeScript as defaultProbeScript } from "./compat/script.js";
 import { deploy as defaultDeploy, deployStatic as defaultDeployStatic } from "./deploy/deploy.js";
+import { openDeployment as defaultOpenDeployment } from "./github/deployments.js";
 import { PLATFORM_NAMES, platformEnvironment } from "./deploy/platform-env.js";
 import { provision as defaultProvision, provisionStatic as defaultProvisionStatic } from "./provision/provision.js";
 import { readSiteConfig } from "./static-site/parse.js";
@@ -34,19 +35,34 @@ export const INPUT_SCHEMA = {
   "smoke-static-path": { default: "" },
   concurrency: { type: "integer", default: 8 },
   "release-note": { default: "" },
+  "github-environment": { default: "production" },
+  "github-token": { default: "" },
 };
 
 export async function run({
   inputs, actions, env = process.env,
   provision = defaultProvision, deploy = defaultDeploy, probeScript = defaultProbeScript,
   provisionStatic = defaultProvisionStatic, deployStatic = defaultDeployStatic,
-  createBunnyApi = defaultCreateBunnyApi, createStorageClient = defaultCreateStorageClient,
+  createBunnyApi = defaultCreateBunnyApi, createStorageClient = defaultCreateStorageClient, openDeployment = defaultOpenDeployment,
 }) {
   const options = { ...defaults(), ...inputs };
   actions.mask(options["bunny-api-key"]);
+  if (options["github-token"]) actions.mask(options["github-token"]);
   const environment = parseEnvironment({ env: options.env, secrets: options.secrets });
   for (const secret of environment.secrets) actions.mask(secret.value);
 
+  const record = await openDeployment({ env, token: options["github-token"], environment: options["github-environment"], warn: actions.warning });
+  try {
+    const deployed = await deployBuild({ options, actions, env, environment, provision, deploy, probeScript, provisionStatic, deployStatic, createBunnyApi, createStorageClient });
+    await record?.succeed({ url: `https://${deployed.hostname}`, deployId: deployed.deployId });
+    return deployed;
+  } catch (error) {
+    await record?.fail(error.message);
+    throw error;
+  }
+}
+
+async function deployBuild({ options, actions, env, environment, provision, deploy, probeScript, provisionStatic, deployStatic, createBunnyApi, createStorageClient }) {
   const compat = await actions.group("Compatibility check", () => checkCompatibility({ options, environment, actions, probeScript }));
   if (compat.errors.length > 0) throw new Error(`compatibility check failed with ${compat.errors.length} problem(s)`);
   const { manifest } = compat;
@@ -65,10 +81,10 @@ export async function run({
     monthlyBandwidthLimit: options["monthly-bandwidth-limit-gb"] * 1000 ** 3,
   };
   const api = createBunnyApi({ apiKey: options["bunny-api-key"] });
-  const shared = { options, actions, config, api, manifest, compat, createStorageClient };
+  const shared = { options, actions, env, config, api, manifest, compat, createStorageClient };
   return manifest.kind === "static"
     ? runStatic({ ...shared, provisionStatic, deployStatic })
-    : runServer({ ...shared, env, environment, provision, deploy });
+    : runServer({ ...shared, environment, provision, deploy });
 }
 
 async function runServer({ options, env, actions, config, api, manifest, compat, environment, provision, deploy, createStorageClient }) {
@@ -102,10 +118,10 @@ async function runServer({ options, env, actions, config, api, manifest, compat,
     rollback: `Release \`${result.release}\`, deploy \`${result.deployId}\`. Roll back by publishing an earlier release in the Bunny dashboard or with \`POST /compute/script/${provisioned.script.Id}/publish/<release id>\`; each release reads its own deploy folder, so its files come back with it while that folder is kept.`,
     sections: [`### Environment\n- variables: ${result.environment.variables.added.length} added, ${result.environment.variables.changed.length} changed\n- secrets: ${result.environment.secrets.added.length} added, ${result.environment.secrets.updated.length} updated\n- on the script but not in the workflow: ${onlyOnScript.join(", ") || "none"}`],
   }));
-  return result;
+  return { ...result, hostname: provisioned.hostname };
 }
 
-async function runStatic({ options, actions, config, api, manifest, compat, provisionStatic, deployStatic, createStorageClient }) {
+async function runStatic({ options, actions, env, config, api, manifest, compat, provisionStatic, deployStatic, createStorageClient }) {
   const provisioned = await provisionLogged(actions, () => provisionStatic({ api, config }));
   const storage = storageClient({ provisioned, actions, createStorageClient });
 
@@ -126,7 +142,7 @@ async function runStatic({ options, actions, config, api, manifest, compat, prov
     rollback: `Deploy \`${result.deployId}\`. Roll back by running the deploy of an earlier commit again: the same build reuses its folder while that folder is kept.`,
     sections: [],
   }));
-  return result;
+  return { ...result, hostname: provisioned.hostname };
 }
 
 async function provisionLogged(actions, provisionSite) {

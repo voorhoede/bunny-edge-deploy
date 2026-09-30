@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  deployments: write # records each deploy in the repository's Environments
 
 # One production deploy at a time; a running deploy is never cancelled, since a
 # deploy cancelled while it publishes can leave a static site's rules half updated.

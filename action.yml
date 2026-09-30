@@ -72,6 +72,12 @@ inputs:
   release-note:
     description: Note stored on the published script release. Defaults to repository, commit and run number. A static build ignores it.
     default: ""
+  github-environment:
+    description: "GitHub environment each deploy is recorded in, through the Deployments API, so the repository's Environments tab lists every deploy with its commit and a link to the site. Empty turns recording off. Needs `deployments: write`; without it the deploy logs a warning and goes ahead."
+    default: production
+  github-token:
+    description: Token used to record the deploy in `github-environment`.
+    default: ${{ github.token }}
 
 outputs:
   hostname:

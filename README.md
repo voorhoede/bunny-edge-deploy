@@ -22,7 +22,8 @@ The action only deploys. Build first, then run it. It creates the Bunny resource
       CMS_TOKEN=${{ secrets.CMS_TOKEN }}
 ```
 
-3. Push. The job summary shows the `<name>.b-cdn.net` hostname, the deploy and what changed.
+3. Give the job `deployments: write`, so each deploy is recorded in the repository's Environments tab with its commit and a link to the site. Without it the deploy logs a warning and goes ahead.
+4. Push. The job summary shows the commit, the `<name>.b-cdn.net` hostname, the deploy and what changed.
 
 [examples/deploy.yml](examples/deploy.yml) is a complete workflow with a concurrency group, minimal permissions and pinned actions. Every input is documented in [action.yml](action.yml).
 
