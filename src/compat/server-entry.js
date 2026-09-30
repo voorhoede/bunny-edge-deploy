@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readFile, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { moduleRequests } from "./module-requests.js";
@@ -9,7 +9,6 @@ const run = promisify(execFile);
 // Verified on the Bunny runtime (Deno 2.7, Node compat 24.2) by importing each module from a deployed script.
 const SUPPORTED_NODE_MODULES = new Set(["assert", "async_hooks", "buffer", "console", "crypto", "diagnostics_channel", "dns", "dns/promises", "domain", "events", "fs", "fs/promises", "http", "http2", "https", "module", "net", "os", "path", "path/posix", "perf_hooks", "process", "punycode", "querystring", "readline", "readline/promises", "stream", "stream/promises", "stream/web", "string_decoder", "timers", "timers/promises", "tls", "url", "util", "util/types", "zlib"].map((m) => `node:${m}`));
 const UNSUPPORTED_NODE_MODULES = new Set(["child_process", "cluster", "constants", "dgram", "inspector", "repl", "sys", "trace_events", "tty", "v8", "vm", "wasi", "worker_threads"].map((m) => `node:${m}`));
-const COMMONJS_PATTERNS = [/\brequire\s*\(/, /\bmodule\.exports\b/, /\b__dirname\b/, /\b__filename\b/];
 
 const megabytes = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
@@ -26,10 +25,9 @@ export async function analyzeServerEntry({ path, sizeLimit, coldStartWarnSize = 
   if (size > sizeLimit) errors.push(`script is ${megabytes(size)}, over the script size limit of ${megabytes(sizeLimit)}`);
   else if (size > coldStartWarnSize) warnings.push(`script is ${megabytes(size)}; scripts over ${megabytes(coldStartWarnSize)} measured 0.5 s or more of cold start on Bunny`);
 
-  const source = await readFile(path, "utf8");
   let requests = [];
   try {
-    requests = await moduleRequests(path, source);
+    requests = await moduleRequests(path);
   } catch (error) {
     errors.push(`script has a syntax error: ${error.message}`);
   }
@@ -39,9 +37,6 @@ export async function analyzeServerEntry({ path, sizeLimit, coldStartWarnSize = 
       if (UNSUPPORTED_NODE_MODULES.has(specifier)) errors.push(`"${specifier}" does not resolve on the Bunny runtime`);
       else if (!SUPPORTED_NODE_MODULES.has(specifier)) warnings.push(`"${specifier}" has not been verified on the Bunny runtime`);
     } else if (!/^(npm:|jsr:|https?:)/.test(specifier)) errors.push(`bare import "${specifier}" cannot be resolved by the Bunny runtime; bundle it or use an npm: specifier`);
-  }
-  for (const pattern of COMMONJS_PATTERNS) {
-    if (pattern.test(source)) errors.push(`CommonJS construct ${pattern.source.replaceAll("\\b", "").replace("\\s*\\(", "(")} found; the script must be ESM`);
   }
   return { errors, warnings, size };
 }

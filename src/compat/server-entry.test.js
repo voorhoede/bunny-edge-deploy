@@ -30,10 +30,16 @@ describe("analyzeServerEntry static checks", () => {
   });
 
   it("errors on relative imports, since they are not bundled", async () => {
-    const source = `import { render } from "./render.js";\nimport("../chunk.js");\nexport * from "./x.js";\n${ok}`;
+    const source = `import { render } from "./render.js";\nexport * from "./x.js";\n${ok}`;
     const { errors } = await analyzeServerEntry({ path: await entryFile(source), sizeLimit: 1e7 });
-    assert.equal(errors.filter((e) => /relative import/.test(e)).length, 3);
+    assert.equal(errors.filter((e) => /relative import/.test(e)).length, 2);
     assert.match(errors[0], /\.\/render\.js/);
+  });
+
+  it("does not read import() out of comments, as Astro's bundled code has them in JSDoc", async () => {
+    const source = `/** The inverse of {@link import('./data-store-writer.js').ChunkedWriter}. */\n// import("./chunk.js")\n${ok}`;
+    const { errors } = await analyzeServerEntry({ path: await entryFile(source), sizeLimit: 1e7 });
+    assert.deepEqual(errors, []);
   });
 
   it("errors on bare package imports, allows npm:, https: and node: modules verified on the runtime", async () => {
@@ -68,10 +74,10 @@ describe("analyzeServerEntry static checks", () => {
     assert.deepEqual(result.errors, []);
   });
 
-  it("errors on CommonJS constructs", async () => {
-    const source = `const x = require("x");\nconsole.log(__dirname, __filename);\nmodule.exports = 1;\n${ok}`;
+  it("passes CommonJS dependencies that esbuild wrapped into the ES module", async () => {
+    const source = `var __commonJS = (cb, mod) => () => (mod || cb[Object.keys(cb)[0]]((mod = { exports: {} }).exports, mod), mod.exports);\nvar require_extend = __commonJS({ "node_modules/extend/index.js"(exports, module) { module.exports = function extend() {}; } });\n${ok}`;
     const { errors } = await analyzeServerEntry({ path: await entryFile(source), sizeLimit: 1e7 });
-    assert.equal(errors.filter((e) => /CommonJS/.test(e)).length, 4);
+    assert.deepEqual(errors, []);
   });
 
   it("errors above the size limit and warns above the cold start threshold", async () => {
@@ -107,6 +113,11 @@ describe("probeServerEntry runtime probe", () => {
     assert.match(result.errors[0], /boom/);
     const middleware = await probeServerEntry({ path: await entryFile(`globalThis.Bunny.v1.registerMiddlewares({ onOriginRequest: [async (ctx) => ctx.request], onOriginResponse: [] });`), startupLimitMs: 500 });
     assert.match(middleware.errors[0], /no request handler.*serve/);
+  });
+
+  it("errors when the script is CommonJS, which fails as soon as it is imported", { skip: !denoAvailable }, async () => {
+    const result = await probeServerEntry({ path: await entryFile(`module.exports = function handler() {};`), startupLimitMs: 500 });
+    assert.match(result.errors[0], /module is not defined/);
   });
 
   it("is skipped with a notice when deno is not installed", async () => {
