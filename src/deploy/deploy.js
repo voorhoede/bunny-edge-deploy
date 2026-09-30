@@ -63,11 +63,12 @@ export async function deployStatic({
   const live = servedDeploy(current);
   const plan = await uploadToFolder({ storage, local, id, concurrency, sleep, log });
 
-  const { confirmed } = await publish({
+  const { confirmed, unchanged } = await publish({
     api, fetch, sleep, pullZone, storageZone, hostname, deployId: id, rules,
     notFound: notFoundSettings({ deployId: id, files }),
   });
-  log(confirmed ? `published deploy ${id}` : `published deploy ${id}, but the site did not report it within 20 s; the smoke test decides`);
+  if (unchanged) log(`deploy ${id} is already live with the same rules and 404 page, so nothing was published or purged`);
+  else log(confirmed ? `published deploy ${id}` : `published deploy ${id}, but the site did not report it within 20 s; the smoke test decides`);
 
   const staticPath = smokeStaticPath ?? defaultStaticPath(local);
   const smoke = await smokeTest({ hostname, staticPath, serverRoute, deployId: id, fetch, sleep, retryForMs: smokeRetryForMs });

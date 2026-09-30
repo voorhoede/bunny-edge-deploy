@@ -19,7 +19,7 @@ Then, for a **server build**:
 For a **static build**:
 
 4. **Publish** by pointing the zone's edge rules at the new folder, applying `_headers` and `_redirects`, setting the build's `404.html` as the 404 page, and deleting the action's rules the build no longer has.
-5. **Purge** the pull zone, wait until the site answers with the new deploy's `X-Bunny-Deploy` header (at least 7.5 s, at most 20 s), and purge again.
+5. **Purge** the pull zone, wait until the site answers with the new deploy's `X-Bunny-Deploy` header (at least 7.5 s, at most 20 s), and purge again. A re-run of a build that is already live, with the same rules and 404 page, changes nothing and skips the purge.
 
 Both again:
 

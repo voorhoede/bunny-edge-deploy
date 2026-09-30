@@ -24,17 +24,35 @@ function fakes({ edgeRules = [], storageZoneSettings = { Custom404FilePath: null
   return { api, fetch, sleep, now: () => clock, events };
 }
 
-const desired = [rule("bunny-edge-deploy: serve the published deploy"), rule("bunny-edge-deploy: block deploy folders")];
+const desired = [rule("bunny-edge-deploy: serve the published deploy", { ActionType: 17, ActionParameter3: "/deploys/689f0795086f/" }), rule("bunny-edge-deploy: block deploy folders")];
 const common = { pullZone: { Id: 33 }, storageZone: { Id: 11 }, hostname: "site.b-cdn.net", deployId: "689f0795086f", notFound: { Custom404FilePath: "/deploys/689f0795086f/404.html", Rewrite404To200: false } };
 
 describe("publishStaticSite", () => {
   it("updates rules it already has in place by passing their Guid, and adds the rest", async () => {
-    const f = fakes({ edgeRules: [{ ...rule("bunny-edge-deploy: serve the published deploy"), Guid: "g-serve" }] });
+    const f = fakes({ edgeRules: [{ ...rule("bunny-edge-deploy: serve the published deploy", { ActionType: 17, ActionParameter3: "/deploys/000000000001/" }), Guid: "g-serve" }] });
     await publishStaticSite({ ...f, ...common, rules: desired });
     assert.deepEqual(f.events.filter((e) => e[0] === "rule"), [
       ["rule", "bunny-edge-deploy: serve the published deploy", "g-serve"],
       ["rule", "bunny-edge-deploy: block deploy folders", undefined],
     ]);
+  });
+
+  it("changes nothing and skips the purge when every rule and the 404 page already match", async () => {
+    // Bunny returns each rule with fields of its own next to the ones that were sent.
+    const live = desired.map((r, i) => ({ ...r, Guid: `g${i}`, OrderIndex: 0, ReadOnly: false, ActionParameter3: r.ActionParameter3 ?? null, Triggers: r.Triggers.map((t) => ({ ...t, Parameter1: "" })) }));
+    const f = fakes({ edgeRules: live, storageZoneSettings: common.notFound });
+    const result = await publishStaticSite({ ...f, ...common, rules: desired });
+    assert.deepEqual(f.events, []);
+    assert.deepEqual(result, { confirmed: true, unchanged: true });
+  });
+
+  it("sends only the rules that changed, and still purges", async () => {
+    const live = desired.map((r, i) => ({ ...r, Guid: `g${i}` }));
+    live[1] = { ...live[1], Enabled: false };
+    const f = fakes({ edgeRules: live, storageZoneSettings: common.notFound });
+    await publishStaticSite({ ...f, ...common, rules: desired });
+    assert.deepEqual(f.events.filter((e) => e[0] === "rule"), [["rule", "bunny-edge-deploy: block deploy folders", "g1"]]);
+    assert.ok(f.events.some((e) => e[0] === "purge"));
   });
 
   it("leaves rules it did not create alone", async () => {

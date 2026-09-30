@@ -19,24 +19,31 @@ export async function publishStaticSite({ api, fetch = globalThis.fetch, sleep =
   const { EdgeRules: current = [] } = await api.pullZones.get(pullZone.Id);
   checkRuleBudget(current, rules);
   const owned = current.filter((existing) => existing.Description?.startsWith(RULE_PREFIX));
+  const existingFor = (rule) => owned.find((candidate) => candidate.Description === rule.Description);
+  const changed = rules.filter((rule) => !existingFor(rule) || !sameFields(rule, existingFor(rule)));
+  const stale = owned.filter((existing) => !rules.some((rule) => rule.Description === existing.Description));
+  const zone = await api.storageZones.get(storageZone.Id);
+  const notFoundChanged = (zone.Custom404FilePath ?? "") !== notFound.Custom404FilePath || zone.Rewrite404To200 !== notFound.Rewrite404To200;
+  if (changed.length === 0 && stale.length === 0 && !notFoundChanged) return { confirmed: true, unchanged: true };
 
-  for (const rule of rules) {
-    const existing = owned.find((candidate) => candidate.Description === rule.Description);
+  for (const rule of changed) {
+    const existing = existingFor(rule);
     await api.pullZones.addOrUpdateEdgeRule(pullZone.Id, existing ? { ...rule, Guid: existing.Guid } : rule);
   }
-  for (const stale of owned.filter((existing) => !rules.some((rule) => rule.Description === existing.Description))) {
-    await api.pullZones.deleteEdgeRule(pullZone.Id, stale.Guid);
-  }
-
-  const zone = await api.storageZones.get(storageZone.Id);
-  if ((zone.Custom404FilePath ?? "") !== notFound.Custom404FilePath || zone.Rewrite404To200 !== notFound.Rewrite404To200) {
-    await api.storageZones.update(storageZone.Id, notFound);
-  }
+  for (const rule of stale) await api.pullZones.deleteEdgeRule(pullZone.Id, rule.Guid);
+  if (notFoundChanged) await api.storageZones.update(storageZone.Id, notFound);
 
   await api.pullZones.purgeAll(pullZone.Id);
   const confirmed = await waitForDeploy({ fetch, sleep, now, hostname, deployId });
   await api.pullZones.purgeAll(pullZone.Id);
   return { confirmed };
+}
+
+// Bunny returns a rule with fields of its own next to the ones it was sent, so only the sent fields are compared.
+function sameFields(sent, got) {
+  if (Array.isArray(sent)) return Array.isArray(got) && got.length === sent.length && sent.every((item, index) => sameFields(item, got[index]));
+  if (sent !== null && typeof sent === "object") return got !== null && typeof got === "object" && Object.keys(sent).every((key) => sameFields(sent[key], got[key]));
+  return sent === got;
 }
 
 async function waitForDeploy({ fetch, sleep, now, hostname, deployId }) {
