@@ -150,6 +150,10 @@ async function checkCompatibility({ options, environment, actions, probeServerEn
   const read = await readBuildManifest(resolve(options["build-manifest"]));
   const errors = [...read.errors, ...environment.errors];
   if (options["keep-deploys"] < 1) errors.push(`keep-deploys is ${options["keep-deploys"]}, but it must be at least 1 so the live deploy keeps its files`);
+  if (options.concurrency < 1) errors.push(`concurrency is ${options.concurrency}, but at least 1 upload has to run at a time`);
+  for (const name of ["script-size-limit-mb", "startup-limit-ms", "monthly-bandwidth-limit-gb"]) {
+    if (options[name] < 0) errors.push(`${name} is ${options[name]}, but it cannot be negative`);
+  }
   const warnings = [];
   if (read.errors.length === 0 && read.manifest.kind === "static") {
     const { manifest } = read;

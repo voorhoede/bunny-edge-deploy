@@ -166,6 +166,15 @@ describe("run", () => {
     assert.equal(calls[0][0], "provisionStatic");
   });
 
+  it("refuses a concurrency below 1 and negative limits, before provisioning", async () => {
+    const path = await project();
+    const { actions, deps, calls, lines } = harness();
+    const inputs = { "build-manifest": path, "bunny-api-key": "key", concurrency: "0", "script-size-limit-mb": "-1", "startup-limit-ms": "-1", "monthly-bandwidth-limit-gb": "-1" };
+    await assert.rejects(run({ inputs, actions, ...deps }), /compatibility check failed/);
+    assert.deepEqual(calls, []);
+    for (const name of ["concurrency", "script-size-limit-mb", "startup-limit-ms", "monthly-bandwidth-limit-gb"]) assert.ok(lines.some((l) => l.startsWith("error:") && l.includes(name)), name);
+  });
+
   it("derives the resource name from the repository when no name is given", async () => {
     const path = await project();
     const { actions, deps, calls } = harness();

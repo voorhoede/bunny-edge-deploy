@@ -67,7 +67,7 @@ inputs:
     description: Static file path requested by the smoke test, with or without a leading slash. Defaults to the first hashed asset in the assets dir, else its first file other than _headers and _redirects.
     default: ""
   concurrency:
-    description: Parallel storage uploads.
+    description: Parallel storage uploads, at least 1.
     default: "8"
   release-note:
     description: Note stored on the published script release. Defaults to repository, commit and run number.
