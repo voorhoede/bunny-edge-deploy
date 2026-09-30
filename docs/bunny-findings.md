@@ -10,7 +10,7 @@ Sources: official OpenAPI specs (`https://core-api-public-docs.b-cdn.net/docs/v3
 - `POST /pullzone/{id} {DisableCookies, EnableSmartCache, CacheControlMaxAgeOverride}` updates those fields on a script-origin zone.
 - The `POST /storagezone` response includes `Password`, `ReadOnlyPassword` and `StorageHostname`.
 - Script responses carry `cdn-cache`. `public, max-age=60` was a HIT on the second request, `public, max-age=31536000, immutable` too, and `private, no-store` stayed a MISS.
-- Nothing in the storage zone is public except what the script serves: `/.bunny-edge-deploy/state.json` and `/deploys/<id>/robots.txt` at the zone root returned 404 through the pull zone, and encoded traversal (`/%2e%2e/...`, `/..%2f...`) returned 400.
+- Nothing in the storage zone is public except what the script serves: a file at the zone root and `/deploys/<id>/robots.txt` returned 404 through the pull zone, and encoded traversal (`/%2e%2e/...`, `/..%2f...`) returned 400.
 - Request headers seen by an Astro endpoint behind the adapter: `host` and `cdn-host` are the public hostname; `x-forwarded-for` and `x-real-ip` carry the client IP; plus `cdn-requestid`, `cdn-requestcountrycode`, `cdn-pullzoneid`, `cdn-serverzone`, `x-forwarded-proto`, `via`.
 - A release id is an 8-character string (`sjSMbTEz`), not a UUID. `POST /compute/script/{id}/publish/{id}` makes an older release active again without creating a new one, and a `Note` sent with it is not stored.
 - Rollback restores code and files together when each release names its own storage folder: after deploying a changed build to `deploys/<new>/` and publishing the previous release by id, the site served the old page and the old hashed CSS.
@@ -45,8 +45,8 @@ Sources: official OpenAPI specs (`https://core-api-public-docs.b-cdn.net/docs/v3
 - The pull zone then reported `Enabled: false` and answered 403, and Storage rejected the zone's own passwords with 401 on every path, so a deploy looks like a storage zone that is not ready yet.
 - `DELETE /pullzone/{id}` returned 404 `pullZone.not_found` while `GET /pullzone/{id}` still returned the zone. Deleting the script and the storage zone still worked (204).
 
-### SSR responses returned from `onOriginRequest`
-- A new pull zone has `CacheControlMaxAgeOverride = 2592000`. With that default every script response is cached 30 days regardless of its Cache-Control, including `private` and `no-store`, and one visitor's cookie-personalized page was served to another.
+### Caching of script responses (measured with the earlier middleware setup, rendering in `onOriginRequest`)
+- A new storage-origin pull zone has `CacheControlMaxAgeOverride = 2592000`; a script-origin zone starts at -1 (above). With that default every script response is cached 30 days regardless of its Cache-Control, including `private` and `no-store`, and one visitor's cookie-personalized page was served to another.
 - With `CacheControlMaxAgeOverride = -1` (and `CacheControlPublicMaxAgeOverride = -1`, the default) the origin header is respected:
   - `public, s-maxage=120`, `public, max-age=120`, `max-age=5, stale-while-revalidate=120`: cached (HIT on second request), header passed through unchanged.
   - `private`, `no-store`, `no-cache`, `public, max-age=0`: not cached (MISS every time).
@@ -60,12 +60,12 @@ Sources: official OpenAPI specs (`https://core-api-public-docs.b-cdn.net/docs/v3
 ### Static files from the storage zone origin
 - Storage sends no Cache-Control. With the override at -1, Bunny serves storage files with `cache-control: max-age=25600000` (296 days) to the CDN and browsers. With the 30-day override it is `public, max-age=2592000`.
 - Content-Type is sniffed from the extension when the upload had none (`.css` served as `text/css`, `.bin` as `application/octet-stream`).
-- The middleware's `onOriginResponse` runs for storage responses on a cache MISS, so the script can rewrite Cache-Control for static files. The rewritten headers are what gets cached.
-- Storage 404 passes through the middleware as a 404 with `cache-control: no-cache`; `onOriginResponse` can replace it with a full 200 response, which is then cached per its own Cache-Control.
-- Latency on MISS from Amsterdam: render in `onOriginRequest` ~105 ms; storage 404 then render in `onOriginResponse` ~140 ms.
+- Earlier middleware setup: the middleware's `onOriginResponse` runs for storage responses on a cache MISS, so the script can rewrite Cache-Control for static files. The rewritten headers are what gets cached.
+- Earlier middleware setup: a storage 404 passes through the middleware as a 404 with `cache-control: no-cache`; `onOriginResponse` can replace it with a full 200 response, which is then cached per its own Cache-Control.
+- Earlier middleware setup, latency on MISS from Amsterdam: render in `onOriginRequest` ~105 ms; storage 404 then render in `onOriginResponse` ~140 ms.
 
 ### Edge rules
-- `OriginStorage` (ActionType 17, `ActionParameter1` = zone id, `ActionParameter2` = zone name, `ActionParameter3` = path prefix prepended to the request path) routes to storage but the middleware still runs. It cannot bypass the script.
+- `OriginStorage` (ActionType 17, `ActionParameter1` = zone id, `ActionParameter2` = zone name, `ActionParameter3` = path prefix prepended to the request path) routes to storage. On a zone with a middleware script, the middleware still runs, so the rule cannot bypass the script.
 - `RunEdgeScript` (ActionType 21) accepts a rule with `ActionParameter1` = script id but requests then return 401 `{"HttpCode":401,"Message":"Unauthorized"}`. Parameters are undocumented.
 - Limits (docs): 50 rules per zone, 5 triggers per rule.
 
@@ -88,7 +88,7 @@ Sources: official OpenAPI specs (`https://core-api-public-docs.b-cdn.net/docs/v3
 - Effective boot limits: value ≤ 2048 bytes (2049 breaks), ≤ 128 variables (129 breaks). Secrets do not count toward the 128 (128 variables + 2 secrets boots).
 - Changing a variable or secret takes effect without a republish, within ~10 s, on new isolates only. A running isolate kept the old value.
 - A running isolate still answered with the old variable value 45 s after the change (44 of 44 requests), and publishing the same code again brought a new isolate with the new value within 2 s (script 93348, pull zone 6717211, deleted, 2026-09-30). A publish is what brings changed values to traffic.
-- Rollback via `POST /compute/script/{id}/publish/{uuid}` works and does not touch variables: values are script-level, not per release.
+- Rollback via `POST /compute/script/{id}/publish/{release id}` works and does not touch variables: values are script-level, not per release.
 - Secrets cannot be read back (`GET /secrets` returns name and LastModified only). Variables can be read back.
 - Endpoints: `PUT /compute/script/{id}/variables` upsert `{Name, DefaultValue, Required}` (200 created, 204 updated); `PUT /compute/script/{id}/secrets` upsert `{Name, Secret}`; `DELETE .../variables/{id}`, `DELETE .../secrets/{id}`. Names must be unique across both.
 
@@ -103,7 +103,7 @@ Sources: official OpenAPI specs (`https://core-api-public-docs.b-cdn.net/docs/v3
 - Compression: gzip, br and zstd are applied automatically to text responses based on Accept-Encoding; tiny bodies are left uncompressed. No pull zone field controls it.
 - `POST /pullzone/{id}/setForceSSL {Hostname, ForceSSL}` on the system hostname makes http redirect 301 to https.
 - Wildcard purge `POST /purge?url=https://host/assets/*` returns 200 and works. Docs rate limit: 30 prefix purges per minute, 300 exact purges per minute.
-- Middleware attach: `POST /pullzone/{id} {MiddlewareScriptId}`. Detach uses `0` (CLI source; `null` is ignored and `-1` rejected).
+- Middleware attach: `POST /pullzone/{id} {MiddlewareScriptId}`. Detach uses `0` (CLI source; `null` is ignored and `-1` rejected). The earlier flow attached one to storage-origin zones; a static deploy now refuses a zone that still has one.
 
 ## Defaults of a freshly created pull zone (storage origin, EU only requested)
 `Type 0 (Standard)`, `CacheControlMaxAgeOverride 2592000`, `CacheControlPublicMaxAgeOverride -1`, `EnableSmartCache false`, `IgnoreQueryStrings true`, `EnableQueryStringOrdering true`, `DisableCookies true` (strips Set-Cookie), `EnableCookieVary false`, all Vary features false, `AddCanonicalHeader false`, `EnableAccessControlOriginHeader true` (auto CORS on 16 asset extensions), `CacheErrorResponses false`, `UseStaleWhileUpdating false`, `UseStaleWhileOffline false`, `EnableTLS1 true`, `EnableTLS1_1 true`, `TlsSecurityLevel 0`, `EnableOriginShield false`, `OptimizerEnabled false`, `PermaCacheStorageZoneId 0`, `EnableLogging true`, `LoggingIPAnonymizationEnabled true`, `LogAnonymizationType 0`, `MonthlyBandwidthLimit 0`, `EnableCacheSlice true`, `EnableWebSockets true`, `EdgeScriptExecutionPhase 0`, system hostname `<name>.b-cdn.net` with `ForceSSL false`, `RoutingFilters ["all"]`. The `EnableGeoZone*` flags in the create body were honored.
