@@ -1,6 +1,6 @@
 // Verified on the account: the script fails to boot above 2048 bytes per value or 128 variables; secrets are not counted.
 const MAX_VALUE_BYTES = 2048;
-const MAX_VARIABLES = 128;
+export const MAX_VARIABLES = 128;
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export function parseEnvironment({ env = "", secrets = "" }) {

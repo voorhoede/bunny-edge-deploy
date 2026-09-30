@@ -83,6 +83,6 @@ The release names its own deploy folder, so its files come back with it, as long
 Verified on a live account, where the documented limits differ:
 
 - Script size: the API accepts more than 10 MB, but 9.5 MB and larger failed to boot reliably. Default limit 8 MB, warning above 2 MB because cold starts then reach 0.5 s.
-- Environment: at most 128 variables and 2048 bytes per value. Bunny accepts larger values, but the script then fails to boot and every request, including static files, returns 400. Secrets do not count toward the 128.
+- Environment: at most 128 variables and 2048 bytes per value. Bunny accepts more, but the script then fails to boot and every request, including static files, returns 400. The 128 counts the variables already on the script plus the new ones, and is checked before any is set. Secrets do not count toward it.
 - Edge rules: 50 per zone, including rules added in the dashboard. A static deploy that would need more fails before changing anything.
 - Variable changes take effect without a republish, on new isolates, within about 10 seconds.

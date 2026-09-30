@@ -24,6 +24,21 @@ describe("syncEnvironment", () => {
     assert.deepEqual(result.notInInput, { variables: ["OLD"], secrets: ["GONE"] });
   });
 
+  it("refuses before setting anything when the script would end up with more than 128 variables", async () => {
+    const full = { variables: Array.from({ length: 127 }, (_, i) => ({ id: i, name: `V${i}`, value: "x" })), secrets: [] };
+    const { scripts, calls } = fakeScripts(full);
+    const twoNew = { variables: [{ name: "A", value: "1" }, { name: "B", value: "2" }], secrets: [{ name: "S", value: "s" }] };
+    await assert.rejects(syncEnvironment({ scripts, scriptId: 5, desired: twoNew }), /129 variables.*127 already on the script.*128/);
+    assert.deepEqual(calls, []);
+  });
+
+  it("counts a variable the script already has once", async () => {
+    const full = { variables: Array.from({ length: 127 }, (_, i) => ({ id: i, name: `V${i}`, value: "x" })), secrets: [] };
+    const { scripts, calls } = fakeScripts(full);
+    await syncEnvironment({ scripts, scriptId: 5, desired: { variables: [{ name: "V0", value: "changed" }, { name: "B", value: "2" }], secrets: [] } });
+    assert.deepEqual(calls, [["var", "V0"], ["var", "B"]]);
+  });
+
   it("only lists when the input is empty", async () => {
     const { scripts, calls } = fakeScripts(remote);
     const result = await syncEnvironment({ scripts, scriptId: 5, desired: { variables: [], secrets: [] } });
