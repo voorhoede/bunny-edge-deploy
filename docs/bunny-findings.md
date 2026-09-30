@@ -1,8 +1,20 @@
-# Bunny.net findings (verified 2026-09-23)
+# Bunny.net findings (verified 2026-09-23 and 2026-09-30)
 
-Sources: official OpenAPI specs (`https://core-api-public-docs.b-cdn.net/docs/v3/public.json` and `compute.json`), docs at `bunny.net/docs` (docs.bunny.net redirects there), the `@bunny.net/edgescript-sdk` package, the Bunny CLI 0.16.1 binary, and live tests on throwaway resources (storage zone 1931485, pull zone 6671152, script 92103, all deleted afterwards).
+Sources: official OpenAPI specs (`https://core-api-public-docs.b-cdn.net/docs/v3/public.json` and `compute.json`), docs at `bunny.net/docs` (docs.bunny.net redirects there), the `@bunny.net/edgescript-sdk` package, the Bunny CLI 0.16.1 binary, and live tests on throwaway resources (2026-09-23: storage zone 1931485, pull zone 6671152, script 92103; 2026-09-30: storage zone 1955250, pull zone 6715744, script 93293; all deleted afterwards).
 
 ## Live-tested behavior
+
+### Standalone script as the pull zone origin (2026-09-30, `@bunny.net/astro-adapter` 0.1.0 on Astro 7.3.5)
+- `POST /compute/script {Name, ScriptType: 1, CreateLinkedPullZone: false}` followed by `POST /pullzone {Name, OriginType: 4, EdgeScriptId}` gives a working script-origin zone. The script's `LinkedPullZones` then lists that zone.
+- Defaults of that zone differ from a storage-origin zone: `CacheControlMaxAgeOverride -1`, `CacheControlPublicMaxAgeOverride -1`, `EnableSmartCache false`, `DisableCookies true`, `EnableCacheSlice false`, `IgnoreQueryStrings true`, `StorageZoneId -1`, `MiddlewareScriptId null`, `OriginUrl https://bunnycdn.com`, TLS 1.0 and 1.1 on.
+- `POST /pullzone/{id} {DisableCookies, EnableSmartCache, CacheControlMaxAgeOverride}` updates those fields on a script-origin zone.
+- The `POST /storagezone` response includes `Password`, `ReadOnlyPassword` and `StorageHostname`.
+- Script responses carry `cdn-cache`. `public, max-age=60` was a HIT on the second request, `public, max-age=31536000, immutable` too, and `private, no-store` stayed a MISS.
+- Nothing in the storage zone is public except what the script serves: `/.bunny-edge-deploy/state.json` and `/deploys/<id>/robots.txt` at the zone root returned 404 through the pull zone, and encoded traversal (`/%2e%2e/...`, `/..%2f...`) returned 400.
+- Request headers seen by an Astro endpoint behind the adapter: `host` and `cdn-host` are the public hostname; `x-forwarded-for` and `x-real-ip` carry the client IP; plus `cdn-requestid`, `cdn-requestcountrycode`, `cdn-pullzoneid`, `cdn-serverzone`, `x-forwarded-proto`, `via`.
+- A release id is an 8-character string (`sjSMbTEz`), not a UUID. `POST /compute/script/{id}/publish/{id}` makes an older release active again without creating a new one, and a `Note` sent with it is not stored.
+- Rollback restores code and files together when each release names its own storage folder: after deploying a changed build to `deploys/<new>/` and publishing the previous release by id, the site served the old page and the old hashed CSS.
+- `DELETE https://storage.bunnycdn.com/<zone>/deploys/<id>/` (trailing slash) deletes the folder and everything in it (200).
 
 ### SSR responses returned from `onOriginRequest`
 - A new pull zone has `CacheControlMaxAgeOverride = 2592000`. With that default every script response is cached 30 days regardless of its Cache-Control, including `private` and `no-store`, and one visitor's cookie-personalized page was served to another.
@@ -66,7 +78,7 @@ Sources: official OpenAPI specs (`https://core-api-public-docs.b-cdn.net/docs/v3
 `Type 0 (Standard)`, `CacheControlMaxAgeOverride 2592000`, `CacheControlPublicMaxAgeOverride -1`, `EnableSmartCache false`, `IgnoreQueryStrings true`, `EnableQueryStringOrdering true`, `DisableCookies true` (strips Set-Cookie), `EnableCookieVary false`, all Vary features false, `AddCanonicalHeader false`, `EnableAccessControlOriginHeader true` (auto CORS on 16 asset extensions), `CacheErrorResponses false`, `UseStaleWhileUpdating false`, `UseStaleWhileOffline false`, `EnableTLS1 true`, `EnableTLS1_1 true`, `TlsSecurityLevel 0`, `EnableOriginShield false`, `OptimizerEnabled false`, `PermaCacheStorageZoneId 0`, `EnableLogging true`, `LoggingIPAnonymizationEnabled true`, `LogAnonymizationType 0`, `MonthlyBandwidthLimit 0`, `EnableCacheSlice true`, `EnableWebSockets true`, `EdgeScriptExecutionPhase 0`, system hostname `<name>.b-cdn.net` with `ForceSSL false`, `RoutingFilters ["all"]`. The `EnableGeoZone*` flags in the create body were honored.
 
 ## Docs facts used
-- Enums: `PullZoneType` 0 Premium (Standard) / 1 Volume; `OriginType` 2 StorageZone; `ExecutionPhase` 0 Cache / 2 PreCache; `StorageZoneTier` 0 Standard / 1 Edge; `LogAnonymizationType` 0 OneDigit / 1 Drop; `ScriptType` 1 CDN (standalone) / 2 Middleware.
+- Enums: `PullZoneType` 0 Premium (Standard) / 1 Volume; `OriginType` 2 StorageZone / 4 EdgeScript; `ExecutionPhase` 0 Cache / 2 PreCache; `StorageZoneTier` 0 Standard / 1 Edge; `LogAnonymizationType` 0 OneDigit / 1 Drop; `ScriptType` 1 CDN (standalone) / 2 Middleware.
 - Storage regions: DE is documented as Frankfurt; Falkenstein appears only on stale OpenAPI pages. Standard tier regions: DE, UK, SE, NY, LA, SG, SYD, BR, ZA/JH. Replication regions cannot be removed after creation. Edge tier requires DE as primary and costs $0.02/GB vs $0.01/GB.
 - Disabled pricing regions: "requests are automatically routed to the nearest enabled region".
 - Volume tier PoPs: Frankfurt, Paris, Chicago, Dallas, Los Angeles, Miami, São Paulo, Hong Kong, Singapore, Tokyo. Standard tier includes Amsterdam. Standard EU $0.01/GB, Volume $0.005/GB.
