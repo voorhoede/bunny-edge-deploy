@@ -8,6 +8,8 @@ import { analyzeServerEntry, probeServerEntry as defaultProbeServerEntry } from 
 import { deploy as defaultDeploy, deployStatic as defaultDeployStatic } from "./deploy/deploy.js";
 import { PLATFORM_NAMES, platformEnvironment } from "./deploy/platform-env.js";
 import { provision as defaultProvision, provisionStatic as defaultProvisionStatic } from "./provision/provision.js";
+import { readSiteConfig } from "./static-site/parse.js";
+import { analyzeSiteConfig } from "./static-site/rules.js";
 
 export const INPUT_SCHEMA = {
   "build-manifest": { default: ".bunny/build.json" },
@@ -153,8 +155,9 @@ async function checkCompatibility({ options, environment, actions, probeServerEn
     const { manifest } = read;
     if (environment.variables.length + environment.secrets.length > 0) errors.push("a static build has no script, so env and secrets have nowhere to go; remove them from the workflow");
     const client = await analyzeClientDir({ path: manifest.assets.dir });
-    errors.push(...client.errors);
-    warnings.push(...client.warnings);
+    const site = analyzeSiteConfig(await readSiteConfig(manifest.assets.dir));
+    errors.push(...client.errors, ...site.errors);
+    warnings.push(...client.warnings, ...site.warnings);
     actions.info(`${manifest.framework.name} static build by ${manifest.adapter.package}, client files: ${client.files.length}`);
   } else if (read.errors.length === 0) {
     const { manifest } = read;

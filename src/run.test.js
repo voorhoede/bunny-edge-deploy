@@ -12,11 +12,12 @@ const requiredEnv = [
   { name: "BUNNY_API_KEY", secret: true, optional: true },
 ];
 
-async function staticProject() {
+async function staticProject(files = {}) {
   const dir = await mkdtemp(join(tmpdir(), "bed-run-static-"));
   await mkdir(join(dir, ".bunny"));
   await mkdir(join(dir, "dist/client"), { recursive: true });
   await writeFile(join(dir, "dist/client/index.html"), "<h1>");
+  for (const [path, content] of Object.entries(files)) await writeFile(join(dir, "dist/client", path), content);
   await writeFile(join(dir, ".bunny/build.json"), JSON.stringify({ manifestVersion: 1, adapter: { package: "@bunny.net/astro-adapter" }, framework: { name: "astro" }, kind: "static", assets: { dir: "dist/client" } }));
   return join(dir, ".bunny/build.json");
 }
@@ -147,6 +148,22 @@ describe("run", () => {
     await assert.rejects(run({ inputs: { "build-manifest": path, "bunny-api-key": "key", env: "A=1" }, actions, ...deps }), /compatibility check failed/);
     assert.deepEqual(calls, []);
     assert.ok(lines.some((l) => /error:.*static build.*no script/.test(l)));
+  });
+
+  it("refuses a static build whose _redirects Bunny cannot apply, before provisioning", async () => {
+    const path = await staticProject({ "_redirects": "/x /y 200\n" });
+    const { actions, deps, calls, lines } = harness();
+    await assert.rejects(run({ inputs: { "build-manifest": path, "bunny-api-key": "key" }, actions, ...deps }), /compatibility check failed/);
+    assert.deepEqual(calls, []);
+    assert.ok(lines.some((l) => /error:.*_redirects.*\/x.*200/.test(l)));
+  });
+
+  it("warns about _headers that no rule can express, and still deploys", async () => {
+    const path = await staticProject({ "_headers": "/x\n  Cache-Control: no-store\n" });
+    const { actions, deps, calls, lines } = harness();
+    await run({ inputs: { "build-manifest": path, "bunny-api-key": "key" }, actions, ...deps });
+    assert.ok(lines.some((l) => /warning:.*_headers.*\/x.*no-store/.test(l)));
+    assert.equal(calls[0][0], "provisionStatic");
   });
 
   it("derives the resource name from the repository when no name is given", async () => {

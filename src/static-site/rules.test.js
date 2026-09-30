@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { notFoundSettings, redirectingPages, siteRules } from "./rules.js";
+import { analyzeSiteConfig, notFoundSettings, siteRules } from "./rules.js";
 
 const storageZone = { Id: 11, Name: "site" };
 const byDescription = (rules) => Object.fromEntries(rules.map((rule) => [rule.Description, rule]));
@@ -18,14 +18,14 @@ describe("siteRules", () => {
       ActionParameter3: "/deploys/689f0795086f/",
       ExtraActions: [{ ActionType: 5, ActionParameter1: "X-Bunny-Deploy", ActionParameter2: "689f0795086f" }],
       TriggerMatchingType: 0,
-      Triggers: [{ Type: 0, PatternMatches: ["*/deploys/*"], PatternMatchingType: 2 }],
+      Triggers: [{ Type: 0, PatternMatches: ["pattern:^https?://[^/]+/deploys/.*$"], PatternMatchingType: 2 }],
     });
   });
 
   it("blocks the deploy folders and the _headers and _redirects files", () => {
     const deploys = rules["bunny-edge-deploy: block deploy folders"];
     assert.equal(deploys.ActionType, 4);
-    assert.deepEqual(deploys.Triggers, [{ Type: 0, PatternMatches: ["*/deploys/*"], PatternMatchingType: 0 }]);
+    assert.deepEqual(deploys.Triggers, [{ Type: 0, PatternMatches: ["pattern:^https?://[^/]+/deploys/.*$"], PatternMatchingType: 0 }]);
     const config = rules["bunny-edge-deploy: block host config files"];
     assert.equal(config.ActionType, 4);
     assert.deepEqual(config.Triggers, [{ Type: 0, PatternMatches: ["*/_headers", "*/_redirects"], PatternMatchingType: 0 }]);
@@ -66,18 +66,21 @@ describe("siteRules from _headers", () => {
     { path: "/about", headers: [csp("b"), ...shared] },
     { path: "/nested/page", headers: [csp("a"), ...shared] },
   ];
-  const rules = siteRules({ storageZone, deployId: "689f0795086f", headers });
+  const files = ["index.html", "about/index.html", "nested/page/index.html", "_astro/app.DFbA8egk.css"];
+  const rules = siteRules({ storageZone, deployId: "689f0795086f", files, headers });
   const find = (predicate) => rules.filter(predicate);
+  const everyPage = (all) => all.find((rule) => rule.Description === "bunny-edge-deploy: headers for every page");
 
   it("turns a Cache-Control max-age into a browser cache time for that path, in place of the default asset rules", () => {
     const cache = find((rule) => rule.ActionType === 16);
     assert.equal(cache.length, 1);
     assert.equal(cache[0].ActionParameter1, "31536000");
     assert.deepEqual(cache[0].Triggers, [{ Type: 0, PatternMatches: ["pattern:^https?://[^/]+/_astro/.*$"], PatternMatchingType: 0 }]);
+    assert.ok(!find((rule) => rule.ActionType === 5).some((rule) => rule.Triggers.some((t) => t.PatternMatches.includes("pattern:^https?://[^/]+/_astro/.*$"))));
   });
 
   it("sends the headers every page has on every URL, from one rule", () => {
-    const [all] = find((rule) => rule.Description === "bunny-edge-deploy: headers for every page");
+    const all = everyPage(rules);
     assert.deepEqual([[all.ActionParameter1, all.ActionParameter2], ...all.ExtraActions.map((a) => [a.ActionParameter1, a.ActionParameter2])], shared);
     assert.deepEqual(all.Triggers, [{ Type: 0, PatternMatches: ["*"], PatternMatchingType: 0 }]);
   });
@@ -103,11 +106,83 @@ describe("siteRules from _headers", () => {
     assert.deepEqual(page.Triggers[0].PatternMatches, ["pattern:^https?://[^/]+/a%.b%-c%(d%)/?$"]);
   });
 
-  it("leaves out a Location header, which only a real redirect can carry, and names the pages that had one", () => {
+  it("leaves out a Location header, which only a real redirect can carry", () => {
     const withLocation = [{ path: "/", headers: [["location", "/en/"], ["x-shared", "yes"]] }];
-    const all = siteRules({ storageZone, deployId: "689f0795086f", headers: withLocation });
+    const all = siteRules({ storageZone, deployId: "689f0795086f", files: ["index.html"], headers: withLocation });
     assert.ok(!JSON.stringify(all).includes('"location"'));
-    assert.deepEqual(redirectingPages(withLocation), ["/"]);
+  });
+
+  it("keeps headers that only some pages have on those pages, so one /admin block cannot reach the whole site", () => {
+    const all = siteRules({ storageZone, deployId: "689f0795086f", files: ["index.html", "admin/index.html"], headers: [{ path: "/admin", headers: [["x-robots-tag", "noindex"]] }] });
+    assert.equal(everyPage(all), undefined);
+    const noindex = all.filter((rule) => rule.ActionType === 5 && rule.ActionParameter1 === "x-robots-tag");
+    assert.deepEqual(noindex.flatMap((rule) => rule.Triggers.flatMap((t) => t.PatternMatches)), ["pattern:^https?://[^/]+/admin/?$"]);
+  });
+
+  it("counts a page as covered with or without its trailing slash, and does not expect headers on a redirect's page", () => {
+    const all = siteRules({
+      storageZone, deployId: "689f0795086f",
+      files: ["index.html", "about/index.html", "old/index.html", "_astro/app.DFbA8egk.css"],
+      headers: [{ path: "/", headers: shared }, { path: "/about/", headers: shared }],
+      redirects: [{ from: "/old", to: "/about", status: 301 }],
+    });
+    assert.ok(everyPage(all));
+  });
+
+  it("applies a wildcard block's headers to every path under it, except Cache-Control, which becomes a browser cache time", () => {
+    const all = siteRules({ storageZone, deployId: "689f0795086f", files: ["index.html"], headers: [
+      { path: "/*", headers: [["x-frame-options", "DENY"]] },
+      { path: "/api/*", headers: [["access-control-allow-origin", "*"], ["Cache-Control", "public, max-age=60"]] },
+    ] });
+    const byName = (name) => all.filter((rule) => rule.ActionType === 5 && rule.ActionParameter1 === name);
+    assert.deepEqual(byName("x-frame-options").map((rule) => [rule.Description, rule.Triggers]), [["bunny-edge-deploy: headers /*", [{ Type: 0, PatternMatches: ["pattern:^https?://[^/]+/.*$"], PatternMatchingType: 0 }]]]);
+    const [api] = byName("access-control-allow-origin");
+    assert.deepEqual(api.Triggers, [{ Type: 0, PatternMatches: ["pattern:^https?://[^/]+/api/.*$"], PatternMatchingType: 0 }]);
+    assert.deepEqual(api.ExtraActions, []);
+  });
+
+  it("makes no rule for a path a rule cannot match: a * before the end, or a :placeholder", () => {
+    const all = siteRules({ storageZone, deployId: "689f0795086f", files: ["index.html"], headers: [
+      { path: "/a/*/b", headers: [["x-a", "1"]] },
+      { path: "/blog/:slug", headers: [["x-b", "1"]] },
+    ] });
+    assert.ok(!all.some((rule) => ["x-a", "x-b"].includes(rule.ActionParameter1)));
+  });
+});
+
+describe("analyzeSiteConfig", () => {
+  it("has nothing to say about the files the Astro adapter writes", () => {
+    const headers = [
+      { path: "/_astro/*", headers: [["Cache-Control", "public, max-age=31536000, immutable"]] },
+      { path: "/about", headers: [["content-security-policy", "script-src 'self'"]] },
+    ];
+    assert.deepEqual(analyzeSiteConfig({ headers, redirects: [{ from: "/old", to: "/about", status: 301 }] }), { errors: [], warnings: [] });
+  });
+
+  it("refuses a redirect without a target, or with a status Bunny cannot redirect with", () => {
+    const { errors } = analyzeSiteConfig({ headers: [], redirects: [{ from: "/a", to: undefined, status: 301 }, { from: "/b", to: "/c", status: 200 }] });
+    assert.equal(errors.length, 2);
+    assert.match(errors[0], /_redirects.*\/a.*no target/);
+    assert.match(errors[1], /_redirects.*\/b.*200.*301, 302, 307 or 308/);
+  });
+
+  it("warns about a Cache-Control without max-age, which a browser cache time cannot express", () => {
+    const { warnings } = analyzeSiteConfig({ headers: [{ path: "/x", headers: [["Cache-Control", "no-store"]] }], redirects: [] });
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /_headers.*\/x.*Cache-Control: no-store/);
+  });
+
+  it("warns about a path a rule cannot match: a * before the end, or a :placeholder", () => {
+    const { warnings } = analyzeSiteConfig({ headers: [{ path: "/a/*/b", headers: [["x-a", "1"]] }, { path: "/blog/:slug", headers: [["x-b", "1"]] }], redirects: [] });
+    assert.equal(warnings.length, 2);
+    assert.match(warnings[0], /\/a\/\*\/b/);
+    assert.match(warnings[1], /\/blog\/:slug/);
+  });
+
+  it("names the pages whose Location header only their own meta refresh can carry", () => {
+    const { warnings } = analyzeSiteConfig({ headers: [{ path: "/", headers: [["location", "/en/"]] }], redirects: [] });
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /not redirected.*\//);
   });
 });
 

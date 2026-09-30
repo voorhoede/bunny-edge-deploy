@@ -18,6 +18,13 @@ const chunk = (items, size) => Array.from({ length: Math.ceil(items.length / siz
 const isNamed = (name) => ([header]) => header.toLowerCase() === name;
 
 // `*` in a Url trigger also crosses the host, so `*://*/old` would match `/x/old`; a Lua pattern anchors the path.
+// Bunny refuses a pattern that does not end in `$`.
+const DEPLOYS_PATTERN = "pattern:^https?://[^/]+/deploys/.*$";
+
+const isMatchable = (path) => !path.includes(":") && !path.slice(0, -1).includes("*");
+const isWildcard = (path) => path.endsWith("*");
+const withoutSlash = (path) => path.replace(/(.)\/+$/, "$1");
+
 function pathPattern(path) {
   const escape = (text) => text.replace(/[\^$()%.[\]*+\-?]/g, (character) => `%${character}`);
   if (path.endsWith("*")) return `pattern:^https?://[^/]+${escape(path.slice(0, -1))}.*$`;
@@ -33,8 +40,9 @@ const setHeaders = ([first, ...rest]) => ({
   ExtraActions: rest.map(([name, value]) => ({ ActionType: ACTION.setResponseHeader, ActionParameter1: name, ActionParameter2: value })),
 });
 
-export function siteRules({ storageZone, deployId, headers = [], redirects = [] }) {
-  const cacheRules = browserCacheRules(headers);
+export function siteRules({ storageZone, deployId, files = [], headers = [], redirects = [] }) {
+  const blocks = headers.filter(({ path }) => isMatchable(path));
+  const cacheRules = browserCacheRules(blocks);
   return [
     rule("serve the published deploy", {
       ActionType: ACTION.originStorage,
@@ -43,12 +51,12 @@ export function siteRules({ storageZone, deployId, headers = [], redirects = [] 
       ActionParameter3: `/${deployFolder(deployId)}/`,
       ExtraActions: [{ ActionType: ACTION.setResponseHeader, ActionParameter1: DEPLOY_HEADER, ActionParameter2: deployId }],
       TriggerMatchingType: MATCH.any,
-      Triggers: [{ Type: TRIGGER.url, PatternMatches: ["*/deploys/*"], PatternMatchingType: MATCH.none }],
+      Triggers: [{ Type: TRIGGER.url, PatternMatches: [DEPLOYS_PATTERN], PatternMatchingType: MATCH.none }],
     }),
     rule("block deploy folders", {
       ActionType: ACTION.blockRequest,
       TriggerMatchingType: MATCH.any,
-      Triggers: [{ Type: TRIGGER.url, PatternMatches: ["*/deploys/*"], PatternMatchingType: MATCH.any }],
+      Triggers: [{ Type: TRIGGER.url, PatternMatches: [DEPLOYS_PATTERN], PatternMatchingType: MATCH.any }],
     }),
     rule("block host config files", {
       ActionType: ACTION.blockRequest,
@@ -61,7 +69,8 @@ export function siteRules({ storageZone, deployId, headers = [], redirects = [] 
       TriggerMatchingType: MATCH.any,
       Triggers: [{ Type: TRIGGER.urlExtension, PatternMatches: extensions, PatternMatchingType: MATCH.any }],
     }))),
-    ...headerRules(headers),
+    ...wildcardHeaderRules(blocks),
+    ...pageHeaderRules(blocks, servedPages(files, redirects)),
     ...redirects.map(redirectRule),
   ];
 }
@@ -80,13 +89,32 @@ function browserCacheRules(blocks) {
   });
 }
 
-function headerRules(blocks) {
-  const pages = blocks.filter(({ path }) => !path.includes("*")).map(({ path, headers }) => ({
-    path,
-    headers: headers.filter((header) => !isNamed("cache-control")(header) && !isNamed("location")(header)),
-  }));
+const ruleHeaders = (headers) => headers.filter((header) => !isNamed("cache-control")(header) && !isNamed("location")(header));
+
+// The pages a build serves, without the pages Astro writes for a redirect, which carry no headers.
+function servedPages(files, redirects) {
+  const redirected = new Set(redirects.map(({ from }) => withoutSlash(from)));
+  return files
+    .filter((file) => file.endsWith(".html"))
+    .map((file) => withoutSlash(`/${file.replace(/(^|\/)index\.html$/, "$1").replace(/\.html$/, "")}`))
+    .filter((path) => !redirected.has(path));
+}
+
+function wildcardHeaderRules(blocks) {
+  return blocks.filter(({ path }) => isWildcard(path)).flatMap(({ path, headers }) => {
+    const applied = ruleHeaders(headers);
+    if (applied.length === 0) return [];
+    return [rule(`headers ${path}`, { ...setHeaders(applied), TriggerMatchingType: MATCH.any, Triggers: pathTriggers([path]) })];
+  });
+}
+
+// Headers go on every URL only when every page has them; a block for one page must not reach the whole site.
+function pageHeaderRules(blocks, served) {
+  const pages = blocks.filter(({ path }) => !isWildcard(path)).map(({ path, headers }) => ({ path, headers: ruleHeaders(headers) }));
   const key = ([name, value]) => `${name.toLowerCase()}: ${value}`;
-  const shared = pages.length === 0 ? [] : pages[0].headers.filter((header) => pages.every((page) => page.headers.some((other) => key(other) === key(header))));
+  const covered = new Set(pages.map(({ path }) => withoutSlash(path)));
+  const everyPageCovered = pages.length > 0 && served.every((path) => covered.has(path));
+  const shared = !everyPageCovered ? [] : pages[0].headers.filter((header) => pages.every((page) => page.headers.some((other) => key(other) === key(header))));
   const sharedKeys = new Set(shared.map(key));
 
   const groups = new Map();
@@ -108,9 +136,16 @@ function headerRules(blocks) {
   return [...everyPage, ...pageRules];
 }
 
+function redirectError({ from, to, status }) {
+  if (!to) return `_redirects line for ${from} has no target`;
+  if (!REDIRECT_STATUSES.includes(status)) return `_redirects sends ${from} with status ${status}, but a Bunny redirect rule takes 301, 302, 307 or 308`;
+  return undefined;
+}
+
 // Bunny refuses a relative redirect target, so a path goes to the host the visitor asked for.
 function redirectRule({ from, to, status }) {
-  if (!REDIRECT_STATUSES.includes(status)) throw new Error(`_redirects sends ${from} with status ${status}, but a Bunny redirect rule takes 301, 302, 307 or 308`);
+  const error = redirectError({ from, to, status });
+  if (error) throw new Error(error);
   return rule(`redirect ${from}`, {
     ActionType: ACTION.redirect,
     ActionParameter1: to.startsWith("/") ? `https://%{Url.Hostname}${to}` : to,
@@ -120,7 +155,22 @@ function redirectRule({ from, to, status }) {
   });
 }
 
-export const redirectingPages = (blocks) => blocks.filter(({ headers }) => headers.some(isNamed("location"))).map(({ path }) => path);
+export function analyzeSiteConfig({ headers = [], redirects = [] }) {
+  const errors = redirects.map(redirectError).filter(Boolean);
+  const warnings = [];
+  for (const { path, headers: blockHeaders } of headers) {
+    if (!isMatchable(path)) {
+      warnings.push(`_headers path ${path} cannot be matched by an edge rule, which takes a * only at the end and no :placeholder; its headers are not applied`);
+      continue;
+    }
+    for (const [name, value] of blockHeaders.filter(isNamed("cache-control"))) {
+      if (!/max-age=\d+/.test(value)) warnings.push(`_headers for ${path}: ${name}: ${value} has no max-age, and only a max-age becomes a Bunny browser cache time; it is not applied`);
+    }
+  }
+  const redirecting = headers.filter(({ headers: blockHeaders }) => blockHeaders.some(isNamed("location"))).map(({ path }) => path);
+  if (redirecting.length > 0) warnings.push(`not redirected by the CDN, only by the page's own meta refresh: ${redirecting.join(", ")}`);
+  return { errors, warnings };
+}
 
 // The 404 path is a storage zone setting, so it moves with every publish; the API only clears it with an empty path.
 export function notFoundSettings({ deployId, files }) {

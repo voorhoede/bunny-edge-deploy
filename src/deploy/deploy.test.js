@@ -20,7 +20,7 @@ async function build(files) {
 
 const checksum = (text) => createHash("sha256").update(text).digest("hex").toUpperCase();
 
-function fakes({ remote = () => [], folders = [] } = {}) {
+function fakes({ remote = () => [], folders = [], edgeRules = [] } = {}) {
   const events = [];
   let inFlight = 0;
   let maxInFlight = 0;
@@ -44,7 +44,7 @@ function fakes({ remote = () => [], folders = [] } = {}) {
       variables: { list: async () => [], upsert: async (id, v) => { events.push(["var", v.name]); return "created"; } },
       secrets: { list: async () => [], upsert: async (id, s) => { events.push(["secret", s.name]); return "created"; } },
     },
-    pullZones: { purgeAll: async (id) => events.push(["purgeAll", id]) },
+    pullZones: { get: async () => ({ EdgeRules: edgeRules }), purgeAll: async (id) => events.push(["purgeAll", id]) },
   };
   const fetch = async (url) => { events.push(["smoke", new URL(url).pathname]); return new Response("ok", { headers: { "cdn-cache": "MISS", "cache-control": "public, max-age=60" } }); };
   const sleep = async (ms) => events.push(["sleep", ms]);
@@ -175,14 +175,20 @@ describe("deployStatic", () => {
     assert.deepEqual(result.pruned, ["000000000001"]);
   });
 
-  it("publishes the build's _headers and _redirects as rules, and names pages whose redirect cannot be applied", async () => {
-    const manifest = await staticBuild({ ...site, "_redirects": "/old /about 301!\n", "_headers": "/\n  location: /en/\n" });
+  it("publishes the build's _headers and _redirects as rules", async () => {
+    const manifest = await staticBuild({ ...site, "_redirects": "/old /about 301!\n" });
     const { storage, api, fetch, sleep } = fakes();
     const publishes = [];
-    const lines = [];
-    await deployStatic({ api, storage, fetch, sleep, log: (line) => lines.push(line), publish: async (args) => { publishes.push(args); return { confirmed: true }; }, manifest, ...staticCommon });
+    await deployStatic({ api, storage, fetch, sleep, publish: async (args) => { publishes.push(args); return { confirmed: true }; }, manifest, ...staticCommon });
     assert.ok(publishes[0].rules.some((rule) => rule.Description === "bunny-edge-deploy: redirect /old"));
-    assert.ok(lines.some((line) => /not redirected.*\//.test(line)));
+  });
+
+  it("refuses before uploading anything when its rules and the zone's other rules would pass Bunny's limit of 50", async () => {
+    const manifest = await staticBuild(site);
+    const others = Array.from({ length: 50 }, (_, i) => ({ Guid: `g${i}`, Description: `someone else's rule ${i}` }));
+    const { storage, api, fetch, sleep, events } = fakes({ edgeRules: others });
+    await assert.rejects(deployStatic({ api, storage, fetch, sleep, publish: async () => ({ confirmed: true }), manifest, ...staticCommon }), /edge rules.*50/);
+    assert.ok(!events.some((e) => e[0] === "upload"));
   });
 
   it("fails and prunes nothing when the smoke test fails", async () => {

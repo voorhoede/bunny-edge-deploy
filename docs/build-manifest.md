@@ -66,9 +66,10 @@ A static build has no script, so `env` and `secrets` are refused. The files are 
 
 `_headers` and `_redirects` are uploaded with the deploy but blocked from the public, and applied as edge rules:
 
-- **`Cache-Control` with `max-age=N`** on a path becomes a browser cache time of N seconds for that path. `immutable` cannot be expressed and is dropped. Without any such block, common asset extensions get one day.
-- **Headers every page shares** go into one rule for all URLs. The remaining headers of each page, such as a CSP with that page's hashes, go into one rule per distinct set, up to 25 pages per rule. A page matches with and without its trailing slash.
-- **A `Location` header** is left out, and the page is named in the log. Its meta refresh still redirects the visitor.
-- **Each redirect** becomes a rule for that path, with status 301, 302, 307 or 308. A relative target goes to the host the visitor asked for.
+- **`Cache-Control` with `max-age=N`** on a path becomes a browser cache time of N seconds for that path. `immutable` cannot be expressed and is dropped. A `Cache-Control` without `max-age` is not applied, and the compatibility check warns about it. Without any `max-age` block, common asset extensions get one day.
+- **A block ending in `*`**, such as `/*` or `/api/*`, becomes a rule for every path under it. A `*` elsewhere in the path or a `:placeholder` cannot be matched by an edge rule, so that block is not applied and the check warns about it.
+- **Headers every page shares** go into one rule for all URLs, but only when every HTML page in the build has a block; the pages Astro writes for a redirect do not count. Otherwise each page keeps its own headers, so a single `/admin` block with `noindex` stays on `/admin`. The remaining headers of each page, such as a CSP with that page's hashes, go into one rule per distinct set, up to 25 pages per rule. A page matches with and without its trailing slash.
+- **A `Location` header** is left out, and the check names the page. Its meta refresh still redirects the visitor.
+- **Each redirect** becomes a rule for that path, with status 301, 302, 307 or 308. A relative target goes to the host the visitor asked for. Another status, or a line without a target, fails the compatibility check.
 
-Bunny allows 50 edge rules per zone, counting rules you add yourself. A deploy that would need more fails before changing anything.
+Bunny allows 50 edge rules per zone, counting rules you add yourself. A deploy that would need more fails before uploading anything.

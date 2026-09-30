@@ -8,13 +8,22 @@ const SETTLE_FLOOR_MS = 7500;
 
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export async function publishStaticSite({ api, fetch = globalThis.fetch, sleep = defaultSleep, now = Date.now, pullZone, storageZone, hostname, deployId, rules, notFound }) {
+export async function assertRuleBudget({ api, pullZone, rules }) {
   const { EdgeRules: current = [] } = await api.pullZones.get(pullZone.Id);
-  const owned = current.filter((existing) => existing.Description?.startsWith(RULE_PREFIX));
-  const others = current.length - owned.length;
+  checkRuleBudget(current, rules);
+}
+
+function checkRuleBudget(current, rules) {
+  const others = current.filter((existing) => !existing.Description?.startsWith(RULE_PREFIX)).length;
   if (rules.length + others > RULE_LIMIT) {
     throw new Error(`publishing would need ${rules.length + others} edge rules on the pull zone, but Bunny allows ${RULE_LIMIT}: ${rules.length} from this deploy and ${others} other rules on the zone; shorten _redirects or ask Bunny support to raise the limit`);
   }
+}
+
+export async function publishStaticSite({ api, fetch = globalThis.fetch, sleep = defaultSleep, now = Date.now, pullZone, storageZone, hostname, deployId, rules, notFound }) {
+  const { EdgeRules: current = [] } = await api.pullZones.get(pullZone.Id);
+  checkRuleBudget(current, rules);
+  const owned = current.filter((existing) => existing.Description?.startsWith(RULE_PREFIX));
 
   for (const rule of rules) {
     const existing = owned.find((candidate) => candidate.Description === rule.Description);
