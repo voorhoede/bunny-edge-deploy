@@ -11,7 +11,7 @@ The action creates the storage zone, the pull zone and, for a server build, the 
 - Server build: Cache Expiration Time "Respect origin Cache-Control" (`CacheControlMaxAgeOverride` -1), plus whatever the manifest asks for in `requires.pullZone`. For Bunny's Astro adapter that is Disable Cookies off and Smart Cache off.
 - Static build: the CDN keeps files for 30 days (`CacheControlMaxAgeOverride` 2592000) and browsers revalidate (`CacheControlPublicMaxAgeOverride` 0).
 
-**The 404 page** (static build). The storage zone's custom 404 path points at the live deploy's `404.html`, or is cleared when the build has none. It changes with every publish.
+**The 404 page** (static build). The storage zone's custom 404 path points at the live deploy's `404.html`, or is cleared when the build has none. It changes with every publish, and `Rewrite404To200` is set to false, so a missing path answers 404 even when the dashboard had a single-page fallback.
 
 The action also turns Force SSL on for every hostname on the zone, including ones you add.
 

@@ -19,4 +19,4 @@
 
 - One commit per reviewable step, written as a [Conventional Commit](https://www.conventionalcommits.org/): `feat:`, `fix:`, `docs:`, `test:`, `chore:`, with a body only when the diff does not show the why.
 - Describe what changes and why, where the risk is, and what you tested, including whether you ran it against a live account.
-- CI runs the test suite on every push and pull request.
+- CI runs the test suite on pull requests and on pushes to main.

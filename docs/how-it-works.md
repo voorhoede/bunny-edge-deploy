@@ -8,7 +8,7 @@ Both kinds of build:
 
 1. **Compatibility check**, before anything is uploaded. Fails with one message per problem. See [build-manifest.md](build-manifest.md) for the rules.
 2. **Provision or verify** the storage zone and the pull zone by name, plus the script for a server build. Missing resources are created with the defaults below. On existing ones the action only enforces the few settings the build needs; see [managing-the-zone.md](managing-the-zone.md).
-3. **Upload** the client files to `deploys/<deploy id>/` in the storage zone. The deploy id is a hash of the files and the script, so the same build always lands in the same folder: a re-run uploads only what is missing, and an unchanged build uploads nothing.
+3. **Upload** the client files to `deploys/<deploy id>/` in the storage zone. The deploy id is a hash of the files, and of the script for a server build, so the same build always lands in the same folder: a re-run uploads only what is missing, and an unchanged build uploads nothing.
 
 Then, for a **server build**:
 
@@ -21,14 +21,14 @@ For a **static build**:
 4. **Publish** by pointing the zone's edge rules at the new folder, applying `_headers` and `_redirects`, setting the build's `404.html` as the 404 page, and deleting the action's rules the build no longer has.
 5. **Purge** the pull zone, wait until the site answers with the new deploy's `X-Bunny-Deploy` header (at least 7.5 s, at most 20 s), and purge again. A re-run of a build that is already live, with the same rules and 404 page, changes nothing and skips the purge.
 
-Both again:
+Last, for both:
 
-7. **Smoke test** one static file and `smoke-route` through the pull zone. The file must answer 2xx and the route 2xx or 3xx, both through Bunny; a static build must also answer for the new deploy in `X-Bunny-Deploy`. When the smoke test fails, the deploy that was live before is published again and the workflow fails ([Rollback](#rollback)).
-8. **Prune**: delete every deploy folder except the newest `keep-deploys` (default 3) and the live one. This only happens after the smoke test passes.
+- **Smoke test** one static file and `smoke-route` through the pull zone. The file must answer 2xx and the route 2xx or 3xx, both through Bunny; a static build must also answer for the new deploy in `X-Bunny-Deploy`. When the smoke test fails, the deploy that was live before is published again and the workflow fails ([Rollback](#rollback)).
+- **Prune**: delete every deploy folder except the newest `keep-deploys` (default 3) and the live one. This only happens after the smoke test passes.
 
 ## Caching
 
-**Server builds.** The pull zone follows the `Cache-Control` the script sends. Verified on a live zone:
+**Server builds.** The pull zone follows the `Cache-Control` the script sends. On a script-origin zone, `public, max-age=60` and one year immutable were cached and `private, no-store` was not; the other rules below were verified when the action still ran the script as middleware, with the same zone cache settings, and have not been re-checked on a script-origin zone:
 
 - `public, max-age=N` and `s-maxage=N` are cached for that long and passed through unchanged.
 - `private`, `no-store`, `no-cache` and `max-age=0` are not cached.

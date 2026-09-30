@@ -7,7 +7,7 @@ branding:
 
 inputs:
   build-manifest:
-    description: Path to the build manifest the adapter writes, for example `@bunny.net/astro-adapter`. The script entry and client dir it names are resolved from the directory above `.bunny/`.
+    description: Path to the build manifest the adapter writes, for example `@bunny.net/astro-adapter`. The script entry and assets dir it names are resolved from the directory above `.bunny/`.
     default: .bunny/build.json
   bunny-api-key:
     description: Bunny.net account API key. Pass it as a secret.
@@ -16,7 +16,7 @@ inputs:
     description: Runtime environment variables to set on the edge script, one KEY=value per line. Everything after the first = is the value, taken literally, so quotes stay part of it. Only listed keys are set or updated; nothing is removed. Variables can also be managed in the Bunny dashboard. Names the action sets from the zones, such as `BUNNY_STORAGE_KEY`, are not allowed, and a static build takes none.
     default: ""
   secrets:
-    description: Encrypted secrets to set on the edge script, one KEY=value per line, with the value taken literally like env. Only listed keys are set; nothing is removed. Values are masked in logs and never read back.
+    description: Encrypted secrets to set on the edge script, one KEY=value per line, with the value taken literally like env. Only listed keys are set; nothing is removed. Values are masked in logs and never read back. Like env, names the action sets are not allowed, and a static build takes none.
     default: ""
   name:
     description: Base name for the storage zone, pull zone and script. Defaults to the repository name, lowercased, with anything outside a-z, 0-9 and dashes replaced by a dash. The pull zone name becomes the `<name>.b-cdn.net` hostname and must be unique across Bunny.
@@ -28,7 +28,7 @@ inputs:
     description: Overrides the pull zone name.
     default: ""
   script-name:
-    description: Overrides the edge script name.
+    description: Overrides the edge script name. A static build has no script and ignores it.
     default: ""
   storage-region:
     description: Main storage region code, used when the storage zone is created. DE is Frankfurt. Cannot be changed afterwards.
@@ -52,13 +52,13 @@ inputs:
     description: Serve the cached response while a fresh one is fetched in the background, set when the pull zone is created. Serves the previous version once after each purge.
     default: "false"
   script-size-limit-mb:
-    description: Fail when the script is larger than this. Bunny documents 10 MB, but scripts of 9.5 MB and up failed to boot reliably in testing.
+    description: Fail when the script is larger than this. Bunny documents 10 MB, but scripts of 9.5 MB and up failed to boot reliably in testing. A static build ignores it.
     default: "8"
   startup-limit-ms:
-    description: Fail when importing the script in a local Deno harness takes longer than this. Only runs when `deno` is on the PATH.
+    description: Fail when importing the script in a local Deno harness takes longer than this. Only runs when `deno` is on the PATH. A static build ignores it.
     default: "500"
   keep-deploys:
-    description: Deploy folders to keep in the storage zone, newest first, and with them the releases you can roll back to. The live deploy is always kept. Older folders are deleted after a deploy passes its smoke test.
+    description: Deploy folders to keep in the storage zone, newest first, as well as the live one. A kept folder is what a rollback returns to, whether the action does it after a failed smoke test or you do it by hand. Older folders are deleted after a deploy passes its smoke test.
     default: "3"
   smoke-route:
     description: Route requested by the smoke test after the deploy. It must answer 2xx or 3xx, so a / that redirects to a language passes.
@@ -70,7 +70,7 @@ inputs:
     description: Parallel storage uploads, at least 1.
     default: "8"
   release-note:
-    description: Note stored on the published script release. Defaults to repository, commit and run number.
+    description: Note stored on the published script release. Defaults to repository, commit and run number. A static build ignores it.
     default: ""
 
 outputs:

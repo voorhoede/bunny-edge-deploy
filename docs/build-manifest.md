@@ -10,11 +10,11 @@ The action deploys what a Bunny framework adapter describes in `.bunny/build.jso
 | `kind` | `"ssr"` deploys a script, `"static"` deploys files only. |
 | `script.entry`, `script.type` | Server builds only. The type must be `"standalone"`. |
 | `assets.dir` | The client files, uploaded to `deploys/<deploy id>/` in the storage zone. |
-| `requires.pullZone` | `disableCookies`, `enableSmartCache` and `enableCacheSlice`, set on the pull zone on every deploy. |
-| `requires.storage.write` | Whether the script gets the storage password that can write (sessions). |
-| `requires.env` | Which platform variables the action sets on the script (below). |
+| `requires.pullZone` | Server builds only. `disableCookies`, `enableSmartCache` and `enableCacheSlice`, set on the pull zone on every deploy. |
+| `requires.storage.write` | Server builds only. Whether the script gets the storage password that can write (sessions). |
+| `requires.env` | Server builds only. Which platform variables the action sets on the script (below). |
 
-`adapter` and `framework` only appear in the log. `script.bytes`, `requires.cliVersion`, `requires.env[].reason` and `dev` are ignored, as are fields the action does not know.
+`adapter` and `framework` only appear in the log. `script.bytes`, `requires.cliVersion`, `requires.env[].reason`, `requires.env[].secret` and `dev` are ignored, as are fields the action does not know. Whether a platform variable is a secret comes from the table below.
 
 ## Server builds
 
@@ -41,16 +41,16 @@ Only the ones `requires.env` names, read live from the zones on every deploy:
 | `BUNNY_SESSION_KEY` | the zone's password that can write, only with `requires.storage.write` | secret |
 | `BUNNY_PULLZONE_ID` | pull zone ID | variable |
 
-The `env` and `secrets` inputs add the app's own variables; they may not reuse these names. A required entry nobody sets, such as `BUNNY_API_KEY` for cache purging, gets a warning unless it already exists on the script.
+The `env` and `secrets` inputs add the app's own variables; they may not reuse these names. A required entry nobody sets gets a warning unless it already exists on the script. An entry marked optional, such as `BUNNY_API_KEY` for cache purging in the Astro adapter's manifest, gets none.
 
 ### What the compatibility check enforces
 
 Errors fail the workflow before anything is uploaded:
 
 - the script is missing, has a syntax error, or is larger than `script-size-limit-mb` (default 8 MB);
-- relative imports or bare package imports, since nothing but the one file is uploaded (`npm:` and `https:` specifiers resolve at run time);
+- relative imports or bare package imports, since nothing but the one file is uploaded (`npm:`, `jsr:`, `http:` and `https:` specifiers resolve at run time);
 - `node:` modules that do not resolve on the runtime: child_process, cluster, constants, dgram, inspector, repl, sys, trace_events, tty, v8, vm, wasi, worker_threads;
-- when Deno is on the PATH: importing the script in a harness with a stubbed `Bunny` global throws, registers no `serve()` handler, or takes longer than `startup-limit-ms` (default 500 ms). This approximates Bunny's startup limit, and it counts the time to download any `npm:` imports.
+- when Deno is on the PATH: importing the script in a harness with a stubbed `Bunny` global throws, registers no `serve()` handler, or takes longer than `startup-limit-ms` (default 500 ms). This approximates Bunny's startup limit. The harness runs twice and times the second import, so downloading `npm:` imports does not count, and it stops after 120 s.
 
 Warnings: a script larger than 2 MB (cold starts measured at 0.5 s and up), and `node:` modules not yet verified on the runtime (sea, sqlite, test).
 

@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 # One production deploy at a time; a running deploy is never cancelled, since a
-# cancelled upload leaves storage half updated.
+# deploy cancelled while it publishes can leave a static site's rules half updated.
 concurrency:
   group: deploy-production
   cancel-in-progress: false
