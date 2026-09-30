@@ -24,7 +24,8 @@ Sources: official OpenAPI specs (`https://core-api-public-docs.b-cdn.net/docs/v3
 - The trigger `*://*/old` also matches `/x/old`. `pattern:^https?://[^/]+/gone/?$` matches `/gone` and `/gone/` only.
 - `BlockRequest` (4) on `*/_headers`, `*/_redirects` and `*/deploys/*` answers 403.
 - `POST /storagezone/{id} {Custom404FilePath: "/deploys/<id>/404.html", Rewrite404To200: false}` (204) made missing paths answer 404 with that page within 10 s.
-- `addOrUpdate` with an existing rule's `Guid` updates it in place.
+- `addOrUpdate` with an existing rule's `Guid` updates it in place, and `DELETE /pullzone/{id}/edgerules/{Guid}` removes a rule (a removed redirect answered 404 right after the next publish).
+- `SetResponseHeader` rules on `pattern:^https?://[^/]+/about/?$` style triggers gave each page its own CSP from `_headers`, alongside a rule on `*` with the headers every page shares.
 
 ### Loading an npm package at runtime instead of bundling it (2026-09-30, Shiki 4.4.3 behind `@bunny.net/astro-adapter`)
 - A script that keeps `import ... from "npm:shiki@4.4.3"` (plus `/langs`, `/engine/oniguruma` and a dynamic `import("npm:shiki@4.4.3/wasm")`) instead of bundling Shiki boots and highlights code on Bunny. Grammars that the package loads with dynamic imports were fetched on first use at request time (js, python, rust, go, ruby, sql all rendered). The script stayed at 2.95 MB, where bundling Shiki made it 12.85 MB.
