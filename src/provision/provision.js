@@ -107,6 +107,9 @@ async function provisionStaticPullZone({ api, config, storageZone, created, upda
   if (pullZone.StorageZoneId !== storageZone.Id) {
     throw new Error(`${name} serves storage zone ${pullZone.StorageZoneId}, not ${storageZone.Id} (${storageZone.Name}); an origin is not repointed automatically, use another pull-zone-name`);
   }
+  if (pullZone.MiddlewareScriptId) {
+    throw new Error(`${name} still runs middleware script ${pullZone.MiddlewareScriptId} from an earlier setup, which would run on every request of the static site; detach it in the Bunny dashboard or use another pull-zone-name`);
+  }
   return applySettings({ api, config, pullZone, settings: STATIC_CACHE_SETTINGS, updated });
 }
 

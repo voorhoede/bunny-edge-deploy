@@ -142,6 +142,11 @@ describe("provisionStatic", () => {
     assert.deepEqual(result.updated, ["pull zone site: CacheControlMaxAgeOverride -1 -> 2592000"]);
   });
 
+  it("fails when the pull zone still runs a middleware script from an earlier setup, which would run on every request", async () => {
+    const { api } = fakeApi({ storageZone, pullZone: { ...staticZone, MiddlewareScriptId: 44 } });
+    await assert.rejects(provisionStatic({ api, config }), /middleware script 44/);
+  });
+
   it("fails when the pull zone serves something other than this storage zone, such as a script", async () => {
     const { api } = fakeApi({ storageZone, pullZone: { ...staticZone, OriginType: 4, StorageZoneId: -1, EdgeScriptId: 22 } });
     await assert.rejects(provisionStatic({ api, config }), /origin.*not storage zone 11/);
