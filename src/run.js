@@ -5,9 +5,9 @@ import { readBuildManifest } from "./build-manifest/build-manifest.js";
 import { analyzeClientDir } from "./compat/client-dir.js";
 import { parseEnvironment } from "./compat/environment.js";
 import { analyzeServerEntry, probeServerEntry as defaultProbeServerEntry } from "./compat/server-entry.js";
-import { deploy as defaultDeploy } from "./deploy/deploy.js";
+import { deploy as defaultDeploy, deployStatic as defaultDeployStatic } from "./deploy/deploy.js";
 import { PLATFORM_NAMES, platformEnvironment } from "./deploy/platform-env.js";
-import { provision as defaultProvision } from "./provision/provision.js";
+import { provision as defaultProvision, provisionStatic as defaultProvisionStatic } from "./provision/provision.js";
 
 export const INPUT_SCHEMA = {
   "build-manifest": { default: ".bunny/build.json" },
@@ -37,6 +37,7 @@ export const INPUT_SCHEMA = {
 export async function run({
   inputs, actions, env = process.env,
   provision = defaultProvision, deploy = defaultDeploy, probeServerEntry = defaultProbeServerEntry,
+  provisionStatic = defaultProvisionStatic, deployStatic = defaultDeployStatic,
   createBunnyApi = defaultCreateBunnyApi, createStorageClient = defaultCreateStorageClient,
 }) {
   const options = { ...defaults(), ...inputs };
@@ -62,17 +63,15 @@ export async function run({
     monthlyBandwidthLimit: options["monthly-bandwidth-limit-gb"] * 1000 ** 3,
   };
   const api = createBunnyApi({ apiKey: options["bunny-api-key"] });
-  const provisioned = await actions.group("Provision", async () => {
-    const result = await provision({ api, config, pullZoneRequirements: manifest.requires.pullZone });
-    for (const item of result.created) actions.info(`created ${item}`);
-    for (const item of result.updated) actions.info(`updated ${item}`);
-    for (const warning of result.warnings) actions.warning(warning);
-    for (const item of result.drift) actions.warning(`drift: ${item}`);
-    return result;
-  });
-  actions.mask(provisioned.storageZone.Password);
-  actions.mask(provisioned.storageZone.ReadOnlyPassword);
-  const storage = createStorageClient({ hostname: provisioned.storageZone.StorageHostname, zoneName: provisioned.storageZone.Name, password: provisioned.storageZone.Password });
+  const shared = { options, actions, config, api, manifest, compat, createStorageClient };
+  return manifest.kind === "static"
+    ? runStatic({ ...shared, provisionStatic, deployStatic })
+    : runServer({ ...shared, env, environment, provision, deploy });
+}
+
+async function runServer({ options, env, actions, config, api, manifest, compat, environment, provision, deploy, createStorageClient }) {
+  const provisioned = await provisionLogged(actions, () => provision({ api, config, pullZoneRequirements: manifest.requires.pullZone }));
+  const storage = storageClient({ provisioned, actions, createStorageClient });
   const platform = platformEnvironment({ requires: manifest.requires, storageZone: provisioned.storageZone, pullZone: provisioned.pullZone });
 
   const result = await actions.group("Deploy", () => deploy({
@@ -96,18 +95,70 @@ export async function run({
   await actions.setOutput("pull-zone-id", String(provisioned.pullZone.Id));
   await actions.setOutput("storage-zone-id", String(provisioned.storageZone.Id));
   await actions.setOutput("script-id", String(provisioned.script.Id));
-  await actions.summary(summary({ provisioned, result, compat }));
+  await actions.summary(summary({
+    provisioned, result, compat,
+    rollback: `Release \`${result.release}\`, deploy \`${result.deployId}\`. Roll back by publishing an earlier release in the Bunny dashboard or with \`POST /compute/script/${provisioned.script.Id}/publish/<release id>\`; each release reads its own deploy folder, so its files come back with it while that folder is kept.`,
+    sections: [`### Environment\n- variables: ${result.environment.variables.added.length} added, ${result.environment.variables.changed.length} changed\n- secrets: ${result.environment.secrets.added.length} added, ${result.environment.secrets.updated.length} updated\n- on the script but not in the workflow: ${onlyOnScript.join(", ") || "none"}`],
+  }));
   return result;
+}
+
+async function runStatic({ options, actions, config, api, manifest, compat, provisionStatic, deployStatic, createStorageClient }) {
+  const provisioned = await provisionLogged(actions, () => provisionStatic({ api, config }));
+  const storage = storageClient({ provisioned, actions, createStorageClient });
+
+  const result = await actions.group("Deploy", () => deployStatic({
+    api, storage, log: actions.info, manifest,
+    storageZone: provisioned.storageZone, pullZone: provisioned.pullZone, hostname: provisioned.hostname,
+    concurrency: options.concurrency, keepDeploys: options["keep-deploys"],
+    serverRoute: options["smoke-route"], smokeStaticPath: options["smoke-static-path"] || undefined,
+  }));
+  for (const warning of result.smoke.warnings) actions.warning(warning);
+
+  await actions.setOutput("hostname", provisioned.hostname);
+  await actions.setOutput("deploy-id", result.deployId);
+  await actions.setOutput("pull-zone-id", String(provisioned.pullZone.Id));
+  await actions.setOutput("storage-zone-id", String(provisioned.storageZone.Id));
+  await actions.summary(summary({
+    provisioned, result, compat,
+    rollback: `Deploy \`${result.deployId}\`. Roll back by running the deploy of an earlier commit again: the same build reuses its folder while that folder is kept.`,
+    sections: [],
+  }));
+  return result;
+}
+
+async function provisionLogged(actions, provisionSite) {
+  return actions.group("Provision", async () => {
+    const result = await provisionSite();
+    for (const item of result.created) actions.info(`created ${item}`);
+    for (const item of result.updated) actions.info(`updated ${item}`);
+    for (const warning of result.warnings) actions.warning(warning);
+    for (const item of result.drift) actions.warning(`drift: ${item}`);
+    return result;
+  });
+}
+
+function storageClient({ provisioned, actions, createStorageClient }) {
+  actions.mask(provisioned.storageZone.Password);
+  actions.mask(provisioned.storageZone.ReadOnlyPassword);
+  return createStorageClient({ hostname: provisioned.storageZone.StorageHostname, zoneName: provisioned.storageZone.Name, password: provisioned.storageZone.Password });
 }
 
 async function checkCompatibility({ options, environment, actions, probeServerEntry }) {
   const read = await readBuildManifest(resolve(options["build-manifest"]));
-  const collisions = [...environment.variables, ...environment.secrets].filter((e) => PLATFORM_NAMES.has(e.name)).map((e) => `"${e.name}" is set by the action from the storage and pull zone; remove it from env and secrets`);
-  const errors = [...read.errors, ...environment.errors, ...collisions];
+  const errors = [...read.errors, ...environment.errors];
   if (options["keep-deploys"] < 1) errors.push(`keep-deploys is ${options["keep-deploys"]}, but it must be at least 1 so the live deploy keeps its files`);
   const warnings = [];
-  if (read.errors.length === 0) {
+  if (read.errors.length === 0 && read.manifest.kind === "static") {
     const { manifest } = read;
+    if (environment.variables.length + environment.secrets.length > 0) errors.push("a static build has no script, so env and secrets have nowhere to go; remove them from the workflow");
+    const client = await analyzeClientDir({ path: manifest.assets.dir });
+    errors.push(...client.errors);
+    warnings.push(...client.warnings);
+    actions.info(`${manifest.framework.name} static build by ${manifest.adapter.package}, client files: ${client.files.length}`);
+  } else if (read.errors.length === 0) {
+    const { manifest } = read;
+    errors.push(...[...environment.variables, ...environment.secrets].filter((e) => PLATFORM_NAMES.has(e.name)).map((e) => `"${e.name}" is set by the action from the storage and pull zone; remove it from env and secrets`));
     const script = await analyzeServerEntry({ path: manifest.script.entry, sizeLimit: options["script-size-limit-mb"] * 1024 * 1024 });
     const probe = script.errors.length === 0 ? await probeServerEntry({ path: manifest.script.entry, startupLimitMs: options["startup-limit-ms"] }) : { skipped: true, errors: [] };
     const client = await analyzeClientDir({ path: manifest.assets.dir });
@@ -131,17 +182,16 @@ export function nameFromRepository(repository = "") {
   return repository.split("/").pop().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "site";
 }
 
-function summary({ provisioned, result, compat }) {
+function summary({ provisioned, result, compat, rollback, sections }) {
   const list = (items) => (items.length > 0 ? items.map((item) => `- ${item}`).join("\n") : "- none");
   return [
     `## Deployed to https://${provisioned.hostname}`,
     "",
-    `Release \`${result.release}\`, deploy \`${result.deployId}\`. Roll back by publishing an earlier release in the Bunny dashboard or with \`POST /compute/script/${provisioned.script.Id}/publish/<release id>\`; each release reads its own deploy folder, so its files come back with it while that folder is kept.`,
+    rollback,
     "",
     `### Files\n- uploaded ${result.uploaded.length} to \`deploys/${result.deployId}/\`, ${result.unchanged.length} already there\n- pruned ${result.pruned.length} old deploy folders${result.pruned.length > 0 ? `: ${result.pruned.join(", ")}` : ""}`,
     "",
-    `### Environment\n- variables: ${result.environment.variables.added.length} added, ${result.environment.variables.changed.length} changed\n- secrets: ${result.environment.secrets.added.length} added, ${result.environment.secrets.updated.length} updated\n- on the script but not in the workflow: ${[...result.environment.notInInput.variables, ...result.environment.notInInput.secrets].join(", ") || "none"}`,
-    "",
+    ...sections.flatMap((section) => [section, ""]),
     "### Smoke test",
     result.smoke.checks.map((c) => `- ${c.kind} \`${c.path}\`: ${c.status}, Cache-Control \`${c.cacheControl ?? "none"}\``).join("\n"),
     "",

@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { deploy } from "./deploy.js";
+import { deploy, deployStatic } from "./deploy.js";
 
 const BUNDLE = "export default {}\n";
 
@@ -142,5 +142,44 @@ describe("deploy", () => {
     const { storage, api, sleep } = fakes();
     const fetch = async () => new Response("nope", { status: 404, headers: { "cdn-cache": "MISS" } });
     await assert.rejects(deploy({ api, storage, fetch, sleep, manifest, environment: { variables: [], secrets: [] }, ...common }), /smoke test failed/);
+  });
+});
+
+describe("deployStatic", () => {
+  async function staticBuild(files) {
+    const root = await mkdtemp(join(tmpdir(), "bed-static-"));
+    for (const [path, content] of Object.entries(files)) {
+      await mkdir(join(root, "dist/client", path, ".."), { recursive: true });
+      await writeFile(join(root, "dist/client", path), content);
+    }
+    return { kind: "static", assets: { dir: join(root, "dist/client") } };
+  }
+  const site = { "index.html": "<h1>", "404.html": "<h1>404", "_astro/app.DFbA8egk.css": "css", "_headers": "/_astro/*\n  Cache-Control: public, max-age=31536000, immutable\n" };
+  const staticCommon = { storageZone: { Id: 11, Name: "site" }, pullZone: { Id: 33 }, hostname: "site.b-cdn.net", serverRoute: "/" };
+
+  it("uploads the build into its folder, publishes that folder, smoke tests, then prunes, and never touches a script", async () => {
+    const manifest = await staticBuild(site);
+    const probe = fakes();
+    const { deployId } = await deployStatic({ ...probe, publish: async () => ({ confirmed: true }), manifest, ...staticCommon });
+    const { storage, api, fetch, sleep, events } = fakes({ folders: [{ name: "000000000001", created: "2026-09-01T00:00:00" }, { name: deployId, created: "2026-09-30T00:00:00" }] });
+    const publishes = [];
+    const publish = async (args) => { events.push(["publish"]); publishes.push(args); return { confirmed: true }; };
+    const result = await deployStatic({ api, storage, fetch, sleep, publish, manifest, ...staticCommon, keepDeploys: 1 });
+    const order = events.map((e) => e[0]).filter((k, i, all) => k !== all[i - 1]);
+    assert.deepEqual(order, ["list", "upload", "publish", "smoke", "listFolders", "removeFolder"]);
+    assert.ok(!events.some((e) => ["uploadCode", "publish-script", "var", "secret"].includes(e[0])));
+    assert.ok(events.filter((e) => e[0] === "upload").some((e) => e[1] === `deploys/${result.deployId}/_headers`));
+    assert.equal(publishes[0].deployId, result.deployId);
+    assert.ok(publishes[0].rules.some((rule) => rule.ActionParameter3 === `/deploys/${result.deployId}/`));
+    assert.deepEqual(publishes[0].notFound, { Custom404FilePath: `/deploys/${result.deployId}/404.html`, Rewrite404To200: false });
+    assert.deepEqual(result.pruned, ["000000000001"]);
+  });
+
+  it("fails and prunes nothing when the smoke test fails", async () => {
+    const manifest = await staticBuild(site);
+    const { storage, api, sleep, events } = fakes({ folders: [{ name: "000000000001", created: "2026-09-01T00:00:00" }] });
+    const fetch = async () => new Response("nope", { status: 500, headers: { "cdn-cache": "MISS" } });
+    await assert.rejects(deployStatic({ api, storage, fetch, sleep, publish: async () => ({ confirmed: true }), manifest, ...staticCommon, smokeRetryForMs: 0 }), /smoke test failed/);
+    assert.ok(!events.some((e) => e[0] === "removeFolder"));
   });
 });

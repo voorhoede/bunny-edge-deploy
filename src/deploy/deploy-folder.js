@@ -8,7 +8,7 @@ export function deployId({ files, bundle }) {
     .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
     .map((file) => `${file.path}:${file.checksum.toLowerCase()}\n`)
     .join("");
-  return sha256(`${lines}server:${sha256(bundle)}\n`).slice(0, 12);
+  return sha256(bundle === undefined ? lines : `${lines}server:${sha256(bundle)}\n`).slice(0, 12);
 }
 
 export const deployFolder = (id) => `deploys/${id}`;

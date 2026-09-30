@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { analyzeClientDir } from "../compat/client-dir.js";
+import { publishStaticSite } from "../static-site/publish.js";
+import { notFoundSettings, siteRules } from "../static-site/rules.js";
 import { deployFolder, deployId, foldersToPrune, preamble } from "./deploy-folder.js";
 import { syncEnvironment } from "./env-sync.js";
 import { smokeTest } from "./smoke.js";
@@ -21,11 +23,7 @@ export async function deploy({
   const local = await readLocalFiles(manifest.assets.dir);
   const bundle = await readFile(manifest.script.entry, "utf8");
   const id = deployId({ files: local, bundle });
-  const folder = deployFolder(id);
-  const remote = (await listWhenReady(storage, folder, sleep)).map((file) => ({ ...file, path: file.path.slice(folder.length + 1) }));
-  const plan = planUpload({ local, remote });
-  log(`deploy ${id}: uploading ${plan.upload.length} files to ${folder}/, ${plan.unchanged.length} already there`);
-  await inBatches(plan.upload, concurrency, (file) => storage.upload(`${folder}/${file.path}`, file.bytes, { contentType: contentTypeFor(file.path) }));
+  const plan = await uploadToFolder({ storage, local, id, concurrency, sleep, log });
 
   const env = await syncEnvironment({ scripts: api.scripts, scriptId, desired: environment });
   log(`environment synced: ${summarize(env)}`);
@@ -43,11 +41,49 @@ export async function deploy({
   const smoke = await smokeTest({ hostname, staticPath, serverRoute, fetch, sleep, retryForMs: smokeRetryForMs });
   if (smoke.errors.length > 0) throw new Error(`smoke test failed:\n${smoke.errors.join("\n")}`);
 
+  const pruned = await pruneFolders({ storage, id, keepDeploys, log });
+  return { deployId: id, uploaded: plan.upload.map((f) => f.path), unchanged: plan.unchanged, pruned, environment: env, release, smoke };
+}
+
+export async function deployStatic({
+  api, storage, fetch, log = () => {}, sleep = defaultSleep, publish = publishStaticSite,
+  manifest, storageZone, pullZone, hostname,
+  concurrency = 8, keepDeploys = 3,
+  serverRoute = "/", smokeStaticPath, smokeRetryForMs,
+}) {
+  const local = await readLocalFiles(manifest.assets.dir);
+  const id = deployId({ files: local });
+  const plan = await uploadToFolder({ storage, local, id, concurrency, sleep, log });
+
+  const { confirmed } = await publish({
+    api, fetch, sleep, pullZone, storageZone, hostname, deployId: id,
+    rules: siteRules({ storageZone, deployId: id }),
+    notFound: notFoundSettings({ deployId: id, files: local.map((f) => f.path) }),
+  });
+  log(confirmed ? `published deploy ${id}` : `published deploy ${id}, but the site did not report it within 20 s; the smoke test decides`);
+
+  const staticPath = smokeStaticPath ?? (local.find((f) => isHashedAsset(f.path)) ?? local[0]).path;
+  const smoke = await smokeTest({ hostname, staticPath, serverRoute, fetch, sleep, retryForMs: smokeRetryForMs });
+  if (smoke.errors.length > 0) throw new Error(`smoke test failed:\n${smoke.errors.join("\n")}`);
+
+  const pruned = await pruneFolders({ storage, id, keepDeploys, log });
+  return { deployId: id, uploaded: plan.upload.map((f) => f.path), unchanged: plan.unchanged, pruned, confirmed, smoke };
+}
+
+async function uploadToFolder({ storage, local, id, concurrency, sleep, log }) {
+  const folder = deployFolder(id);
+  const remote = (await listWhenReady(storage, folder, sleep)).map((file) => ({ ...file, path: file.path.slice(folder.length + 1) }));
+  const plan = planUpload({ local, remote });
+  log(`deploy ${id}: uploading ${plan.upload.length} files to ${folder}/, ${plan.unchanged.length} already there`);
+  await inBatches(plan.upload, concurrency, (file) => storage.upload(`${folder}/${file.path}`, file.bytes, { contentType: contentTypeFor(file.path) }));
+  return plan;
+}
+
+async function pruneFolders({ storage, id, keepDeploys, log }) {
   const pruned = foldersToPrune({ folders: await storage.listFolders("deploys"), current: id, keep: keepDeploys });
   for (const name of pruned) await storage.removeFolder(deployFolder(name));
   if (pruned.length > 0) log(`pruned ${pruned.length} old deploy folders: ${pruned.join(", ")}`);
-
-  return { deployId: id, uploaded: plan.upload.map((f) => f.path), unchanged: plan.unchanged, pruned, environment: env, release, smoke };
+  return pruned;
 }
 
 async function readLocalFiles(clientDir) {

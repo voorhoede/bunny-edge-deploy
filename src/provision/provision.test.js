@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { provision } from "./provision.js";
+import { provision, provisionStatic } from "./provision.js";
 
 function fakeApi({ storageZone, pullZone, script, storageZoneById } = {}) {
   const calls = [];
@@ -112,5 +112,40 @@ describe("provision with existing resources", () => {
     await assert.rejects(provision({ api, config, pullZoneRequirements }), /origin.*not script 22/);
     const { api: other } = fakeApi({ ...existing, pullZone: { ...existing.pullZone, EdgeScriptId: 99 } });
     await assert.rejects(provision({ api: other, config, pullZoneRequirements }), /script 99/);
+  });
+});
+
+describe("provisionStatic", () => {
+  const storageZone = { Id: 11, Name: "site", Region: "DE", ZoneTier: 0, ReplicationRegions: [], Password: "pw", ReadOnlyPassword: "ro", StorageHostname: "storage.bunnycdn.com" };
+  const staticZone = { Id: 33, Name: "site", OriginType: 2, StorageZoneId: 11, CacheControlMaxAgeOverride: 2592000, CacheControlPublicMaxAgeOverride: 0, Hostnames: [{ Value: "site.b-cdn.net", ForceSSL: true, IsSystemHostname: true }] };
+
+  it("creates the storage zone and a pull zone that serves it, and no script", async () => {
+    const { api, calls, names } = fakeApi();
+    const result = await provisionStatic({ api, config });
+    assert.deepEqual(names("").filter((n) => n.includes("create")), ["storageZones.create", "pullZones.create"]);
+    const create = calls.find((c) => c[0] === "pullZones.create")[1];
+    assert.equal(create.Name, "site");
+    assert.equal(create.OriginType, 2);
+    assert.equal(create.StorageZoneId, 11);
+    assert.equal(create.CacheControlMaxAgeOverride, 2592000);
+    assert.equal(create.CacheControlPublicMaxAgeOverride, 0);
+    assert.equal(names("scripts.").length, 0);
+    assert.deepEqual(result.created, ["storage zone site", "pull zone site"]);
+    assert.equal(result.script, undefined);
+    assert.equal(result.hostname, "site.b-cdn.net");
+  });
+
+  it("restores the static cache settings on an existing zone in one update, and says which it changed", async () => {
+    const { api, calls } = fakeApi({ storageZone, pullZone: { ...staticZone, CacheControlMaxAgeOverride: -1 } });
+    const result = await provisionStatic({ api, config });
+    assert.deepEqual(calls.filter((c) => c[0] === "pullZones.update").map((c) => c.slice(1)), [[33, { CacheControlMaxAgeOverride: 2592000 }]]);
+    assert.deepEqual(result.updated, ["pull zone site: CacheControlMaxAgeOverride -1 -> 2592000"]);
+  });
+
+  it("fails when the pull zone serves something other than this storage zone, such as a script", async () => {
+    const { api } = fakeApi({ storageZone, pullZone: { ...staticZone, OriginType: 4, StorageZoneId: -1, EdgeScriptId: 22 } });
+    await assert.rejects(provisionStatic({ api, config }), /origin.*not storage zone 11/);
+    const { api: other } = fakeApi({ storageZone, pullZone: { ...staticZone, StorageZoneId: 99 } });
+    await assert.rejects(provisionStatic({ api: other, config }), /storage zone 99/);
   });
 });

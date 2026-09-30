@@ -13,16 +13,12 @@ export function requiredPullZoneSettings(requirements = {}) {
   return { CacheControlMaxAgeOverride: -1, ...Object.fromEntries(named) };
 }
 
-export function desiredPullZoneSettings({ scriptId, requirements = {}, pricingTier = "standard", pricingRegions = ["EU"], staleWhileUpdating = false, monthlyBandwidthLimit = 0 }) {
+function commonPullZoneSettings({ pricingTier = "standard", pricingRegions = ["EU"], staleWhileUpdating = false, monthlyBandwidthLimit = 0 }) {
   const geoZones = Object.fromEntries(Object.entries(GEO_ZONES).map(([region, key]) => [key, pricingRegions.includes(region)]));
   return {
-    OriginType: 4,
-    EdgeScriptId: scriptId,
     Type: PRICING_TIERS[pricingTier],
     ...geoZones,
     EnableSmartCache: false,
-    CacheControlMaxAgeOverride: -1,
-    CacheControlPublicMaxAgeOverride: -1,
     DisableCookies: false,
     IgnoreQueryStrings: false,
     CacheErrorResponses: false,
@@ -44,6 +40,23 @@ export function desiredPullZoneSettings({ scriptId, requirements = {}, pricingTi
     LoggingSaveToStorage: false,
     LoggingIPAnonymizationEnabled: true,
     MonthlyBandwidthLimit: monthlyBandwidthLimit,
+  };
+}
+
+export function desiredPullZoneSettings({ scriptId, requirements = {}, ...options }) {
+  return {
+    OriginType: 4,
+    EdgeScriptId: scriptId,
+    ...commonPullZoneSettings(options),
+    CacheControlMaxAgeOverride: -1,
+    CacheControlPublicMaxAgeOverride: -1,
     ...requiredPullZoneSettings(requirements),
   };
+}
+
+// Storage sends no Cache-Control, so the zone sets it: the edge keeps files until the next publish purges them, browsers revalidate.
+export const STATIC_CACHE_SETTINGS = { CacheControlMaxAgeOverride: 2592000, CacheControlPublicMaxAgeOverride: 0 };
+
+export function desiredStaticPullZoneSettings({ storageZoneId, ...options }) {
+  return { OriginType: 2, StorageZoneId: storageZoneId, ...commonPullZoneSettings(options), ...STATIC_CACHE_SETTINGS };
 }

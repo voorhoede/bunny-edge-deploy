@@ -78,11 +78,14 @@ describe("readBuildManifest", () => {
     assert.match(errors[0], /manifestVersion 2.*reads 1/);
   });
 
-  it("refuses a static build for now, and says how to get a script", async () => {
-    const { script, ...rest } = astroManifest;
-    const { path } = await project({ ...rest, kind: "static" });
-    const { errors } = await readBuildManifest(path);
-    assert.match(errors[0], /static.*not supported yet/);
+  it("reads a static build, which has no script and needs only its assets dir", async () => {
+    const { root, path } = await project({ manifestVersion: 1, adapter: { package: "@bunny.net/astro-adapter" }, framework: { name: "astro" }, kind: "static", assets: { dir: "dist/client" } }, { entry: null });
+    const { errors, manifest } = await readBuildManifest(path);
+    assert.deepEqual(errors, []);
+    assert.equal(manifest.kind, "static");
+    assert.equal(manifest.script, undefined);
+    assert.deepEqual(manifest.assets, { dir: join(root, "dist/client") });
+    assert.deepEqual(manifest.requires, { pullZone: {}, storage: { write: false }, env: [] });
   });
 
   it("refuses a server build without a script, and a script that is not standalone", async () => {

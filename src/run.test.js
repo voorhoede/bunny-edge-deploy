@@ -12,6 +12,15 @@ const requiredEnv = [
   { name: "BUNNY_API_KEY", secret: true, optional: true },
 ];
 
+async function staticProject() {
+  const dir = await mkdtemp(join(tmpdir(), "bed-run-static-"));
+  await mkdir(join(dir, ".bunny"));
+  await mkdir(join(dir, "dist/client"), { recursive: true });
+  await writeFile(join(dir, "dist/client/index.html"), "<h1>");
+  await writeFile(join(dir, ".bunny/build.json"), JSON.stringify({ manifestVersion: 1, adapter: { package: "@bunny.net/astro-adapter" }, framework: { name: "astro" }, kind: "static", assets: { dir: "dist/client" } }));
+  return join(dir, ".bunny/build.json");
+}
+
 async function project({ env = requiredEnv, script = `import * as BunnySDK from "npm:@bunny.net/edgescript-sdk@0.12.1";\nBunnySDK.net.http.serve(async () => new Response("ok"));\n` } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "bed-run-"));
   await mkdir(join(dir, ".bunny"));
@@ -40,6 +49,14 @@ function harness() {
     deploy: async (args) => {
       calls.push(["deploy", { environment: args.environment, site: args.site, manifest: args.manifest, keepDeploys: args.keepDeploys }]);
       return { deployId: "689f0795086f", uploaded: ["index.html"], unchanged: [], pruned: [], release: "sjSMbTEz", environment: { variables: { added: ["A"], changed: [], unchanged: [] }, secrets: { added: ["S"], updated: [] }, notInInput: { variables: [], secrets: [] } }, smoke: { checks: [], errors: [], warnings: [] } };
+    },
+    provisionStatic: async (args) => {
+      calls.push(["provisionStatic", { config: args.config }]);
+      return { storageZone: { Id: 1, Name: "n", Password: "rw-pw", ReadOnlyPassword: "ro-pw", StorageHostname: "storage.bunnycdn.com" }, pullZone: { Id: 3 }, hostname: "n.b-cdn.net", created: [], updated: [], drift: [], warnings: [] };
+    },
+    deployStatic: async (args) => {
+      calls.push(["deployStatic", { manifest: args.manifest, storageZone: args.storageZone, keepDeploys: args.keepDeploys }]);
+      return { deployId: "5e11111e1824", uploaded: ["index.html"], unchanged: [], pruned: [], confirmed: true, smoke: { checks: [], errors: [], warnings: [] } };
     },
     probeServerEntry: async () => ({ skipped: true, notice: "deno missing", errors: [] }),
     createBunnyApi: () => ({}),
@@ -113,6 +130,23 @@ describe("run", () => {
     await assert.rejects(run({ inputs: { "build-manifest": path, "bunny-api-key": "key", "keep-deploys": 0 }, actions, ...deps }), /compatibility check failed/);
     assert.deepEqual(calls, []);
     assert.ok(lines.some((l) => /error:.*keep-deploys.*at least 1/.test(l)));
+  });
+
+  it("deploys a static build without a script: no script checks, no script, no release", async () => {
+    const path = await staticProject();
+    const { actions, deps, calls, outputs } = harness();
+    await run({ inputs: { "build-manifest": path, "bunny-api-key": "key", name: "s" }, actions, ...deps });
+    assert.deepEqual(calls.map((c) => c[0]), ["provisionStatic", "deployStatic"]);
+    assert.equal(calls[1][1].manifest.kind, "static");
+    assert.deepEqual(outputs, { hostname: "n.b-cdn.net", "deploy-id": "5e11111e1824", "pull-zone-id": "3", "storage-zone-id": "1" });
+  });
+
+  it("refuses env and secrets for a static build, which has no script to set them on", async () => {
+    const path = await staticProject();
+    const { actions, deps, calls, lines } = harness();
+    await assert.rejects(run({ inputs: { "build-manifest": path, "bunny-api-key": "key", env: "A=1" }, actions, ...deps }), /compatibility check failed/);
+    assert.deepEqual(calls, []);
+    assert.ok(lines.some((l) => /error:.*static build.*no script/.test(l)));
   });
 
   it("derives the resource name from the repository when no name is given", async () => {

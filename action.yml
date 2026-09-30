@@ -1,5 +1,5 @@
 name: Bunny Edge Deploy
-description: Deploy the build a Bunny framework adapter describes in .bunny/build.json. Client files go to a Bunny Storage folder per deploy, the server bundle runs as the standalone edge script behind a CDN pull zone.
+description: Deploy the build a Bunny framework adapter describes in .bunny/build.json. Client files go to a Bunny Storage folder per deploy; a server build runs as a standalone edge script behind a CDN pull zone, a static build is served from storage by edge rules.
 author: De Voorhoede
 branding:
   icon: upload-cloud
@@ -13,7 +13,7 @@ inputs:
     description: Bunny.net account API key. Pass it as a secret.
     required: true
   env:
-    description: Runtime environment variables to set on the edge script, one KEY=value per line. Only listed keys are set or updated; nothing is removed. Variables can also be managed in the Bunny dashboard. Names the action sets from the zones, such as `BUNNY_STORAGE_KEY`, are not allowed.
+    description: Runtime environment variables to set on the edge script, one KEY=value per line. Only listed keys are set or updated; nothing is removed. Variables can also be managed in the Bunny dashboard. Names the action sets from the zones, such as `BUNNY_STORAGE_KEY`, are not allowed, and a static build takes none.
     default: ""
   secrets:
     description: Encrypted secrets to set on the edge script, one KEY=value per line. Only listed keys are set; nothing is removed. Values are masked in logs and never read back.
@@ -77,7 +77,7 @@ outputs:
   hostname:
     description: The pull zone system hostname, `<name>.b-cdn.net`.
   release:
-    description: ID of the published script release. Publishing it again rolls back code and files together, while its deploy folder is kept.
+    description: ID of the published script release. Publishing it again rolls back code and files together, while its deploy folder is kept. Empty for a static build.
   deploy-id:
     description: Content hash of this build; its client files are in `deploys/<deploy-id>/` in the storage zone.
   pull-zone-id:
@@ -85,7 +85,7 @@ outputs:
   storage-zone-id:
     description: Bunny storage zone ID.
   script-id:
-    description: Bunny edge script ID.
+    description: Bunny edge script ID. Empty for a static build.
 
 runs:
   using: node24

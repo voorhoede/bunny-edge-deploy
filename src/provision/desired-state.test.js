@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { desiredPullZoneSettings, desiredStorageZone, requiredPullZoneSettings } from "./desired-state.js";
+import { STATIC_CACHE_SETTINGS, desiredPullZoneSettings, desiredStaticPullZoneSettings, desiredStorageZone, requiredPullZoneSettings } from "./desired-state.js";
 
 describe("desiredStorageZone", () => {
   it("defaults to Frankfurt, standard tier, no replication", () => {
@@ -77,5 +77,28 @@ describe("requiredPullZoneSettings", () => {
   it("always turns the cache expiration override off, and maps only the settings a build names", () => {
     assert.deepEqual(requiredPullZoneSettings({}), { CacheControlMaxAgeOverride: -1 });
     assert.deepEqual(requiredPullZoneSettings({ disableCookies: false, enableSmartCache: false, enableCacheSlice: true }), { CacheControlMaxAgeOverride: -1, DisableCookies: false, EnableSmartCache: false, EnableCacheSlice: true });
+  });
+});
+
+describe("desiredStaticPullZoneSettings", () => {
+  const settings = desiredStaticPullZoneSettings({ storageZoneId: 11 });
+
+  it("serves the storage zone, kept 30 days at the edge and revalidated by browsers", () => {
+    assert.equal(settings.OriginType, 2);
+    assert.equal(settings.StorageZoneId, 11);
+    assert.equal("EdgeScriptId" in settings, false);
+    assert.deepEqual(STATIC_CACHE_SETTINGS, { CacheControlMaxAgeOverride: 2592000, CacheControlPublicMaxAgeOverride: 0 });
+    assert.equal(settings.CacheControlMaxAgeOverride, 2592000);
+    assert.equal(settings.CacheControlPublicMaxAgeOverride, 0);
+  });
+
+  it("shares every other default with a zone that runs a script", () => {
+    const script = desiredPullZoneSettings({ scriptId: 22, pricingRegions: ["EU", "US"] });
+    const staticSite = desiredStaticPullZoneSettings({ storageZoneId: 11, pricingRegions: ["EU", "US"] });
+    for (const key of ["OriginType", "EdgeScriptId", "StorageZoneId", "CacheControlMaxAgeOverride", "CacheControlPublicMaxAgeOverride"]) {
+      delete script[key];
+      delete staticSite[key];
+    }
+    assert.deepEqual(staticSite, script);
   });
 });

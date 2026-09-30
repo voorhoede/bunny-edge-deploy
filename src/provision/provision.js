@@ -1,8 +1,9 @@
-import { desiredPullZoneSettings, desiredStorageZone, requiredPullZoneSettings } from "./desired-state.js";
+import { STATIC_CACHE_SETTINGS, desiredPullZoneSettings, desiredStaticPullZoneSettings, desiredStorageZone, requiredPullZoneSettings } from "./desired-state.js";
 
 const TIER_NAMES = ["standard", "edge"];
 const STANDALONE = 1;
 const EDGE_SCRIPT_ORIGIN = 4;
+const STORAGE_ORIGIN = 2;
 
 export async function provision({ api, config, pullZoneRequirements = {} }) {
   const created = [];
@@ -16,6 +17,19 @@ export async function provision({ api, config, pullZoneRequirements = {} }) {
   const hostname = await forceHttps({ api, pullZone });
 
   return { storageZone, script, pullZone, hostname, created, updated, drift, warnings };
+}
+
+export async function provisionStatic({ api, config }) {
+  const created = [];
+  const updated = [];
+  const drift = [];
+  const warnings = [];
+
+  const storageZone = await provisionStorageZone({ api, config, created, drift, warnings });
+  const pullZone = await provisionStaticPullZone({ api, config, storageZone, created, updated });
+  const hostname = await forceHttps({ api, pullZone });
+
+  return { storageZone, pullZone, hostname, created, updated, drift, warnings };
 }
 
 async function provisionStorageZone({ api, config, created, drift, warnings }) {
@@ -69,7 +83,35 @@ async function provisionPullZone({ api, config, script, pullZoneRequirements, cr
   if (pullZone.EdgeScriptId !== script.Id) {
     throw new Error(`${name} runs script ${pullZone.EdgeScriptId} as its origin, not script ${script.Id} (${script.Name}); an origin is not repointed automatically, use another pull-zone-name`);
   }
-  const changes = Object.fromEntries(Object.entries(requiredPullZoneSettings(pullZoneRequirements)).filter(([field, value]) => pullZone[field] !== value));
+  return applySettings({ api, config, pullZone, settings: requiredPullZoneSettings(pullZoneRequirements), updated });
+}
+
+async function provisionStaticPullZone({ api, config, storageZone, created, updated }) {
+  const pullZone = await api.pullZones.findByName(config.pullZoneName);
+  if (!pullZone) {
+    const desired = desiredStaticPullZoneSettings({
+      storageZoneId: storageZone.Id,
+      pricingTier: config.pricingTier,
+      pricingRegions: config.pricingRegions,
+      staleWhileUpdating: config.staleWhileUpdating,
+      monthlyBandwidthLimit: config.monthlyBandwidthLimit,
+    });
+    const createdZone = await api.pullZones.create({ Name: config.pullZoneName, ...desired });
+    created.push(`pull zone ${config.pullZoneName}`);
+    return createdZone;
+  }
+  const name = `pull zone "${config.pullZoneName}"`;
+  if (pullZone.OriginType !== STORAGE_ORIGIN) {
+    throw new Error(`${name} has another origin (OriginType ${pullZone.OriginType}), not storage zone ${storageZone.Id} (${storageZone.Name}); an origin is not repointed automatically, use another pull-zone-name`);
+  }
+  if (pullZone.StorageZoneId !== storageZone.Id) {
+    throw new Error(`${name} serves storage zone ${pullZone.StorageZoneId}, not ${storageZone.Id} (${storageZone.Name}); an origin is not repointed automatically, use another pull-zone-name`);
+  }
+  return applySettings({ api, config, pullZone, settings: STATIC_CACHE_SETTINGS, updated });
+}
+
+async function applySettings({ api, config, pullZone, settings, updated }) {
+  const changes = Object.fromEntries(Object.entries(settings).filter(([field, value]) => pullZone[field] !== value));
   if (Object.keys(changes).length === 0) return pullZone;
   await api.pullZones.update(pullZone.Id, changes);
   for (const [field, value] of Object.entries(changes)) updated.push(`pull zone ${config.pullZoneName}: ${field} ${pullZone[field]} -> ${value}`);
