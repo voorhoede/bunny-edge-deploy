@@ -40,7 +40,7 @@ function harness() {
   const outputs = {};
   const actions = {
     mask: (v) => lines.push(`mask:${v}`), info: (m) => lines.push(m), warning: (m) => lines.push(`warning:${m}`), error: (m) => lines.push(`error:${m}`),
-    group: async (name, fn) => { lines.push(`group:${name}`); return fn(); }, setOutput: async (k, v) => { outputs[k] = v; }, summary: async (md) => lines.push(`summary:${md.length}`),
+    group: async (name, fn) => { lines.push(`group:${name}`); return fn(); }, setOutput: async (k, v) => { outputs[k] = v; }, summary: async (md) => lines.push(`summary:${md}`),
   };
   const deployments = [];
   const deps = {
@@ -200,6 +200,13 @@ describe("run", () => {
     deps.deployStatic = async () => { throw new Error("smoke test failed:\nroute / returned 500"); };
     await assert.rejects(run({ inputs: { "build-manifest": path, "bunny-api-key": "key", "github-environment": "staging" }, actions, ...deps }), /smoke test failed/);
     assert.deepEqual(deployments, [["open", { environment: "staging", token: "" }], ["fail", "smoke test failed:\nroute / returned 500"]]);
+  });
+
+  it("names the deployed commit in the summary heading", async () => {
+    const path = await staticProject();
+    const { actions, deps, lines } = harness();
+    await run({ inputs: { "build-manifest": path, "bunny-api-key": "key" }, actions, env: { GITHUB_SHA: "f93a1cb62232316f878cad7c1814c24d9751b300" }, ...deps });
+    assert.ok(lines.some((l) => l.startsWith("summary:## Deployed `f93a1cb` to https://n.b-cdn.net")), lines.filter((l) => l.startsWith("summary:")).join("\n").slice(0, 200));
   });
 
   it("derives the resource name from the repository when no name is given", async () => {

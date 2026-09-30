@@ -114,7 +114,7 @@ async function runServer({ options, env, actions, config, api, manifest, compat,
   await actions.setOutput("storage-zone-id", String(provisioned.storageZone.Id));
   await actions.setOutput("script-id", String(provisioned.script.Id));
   await actions.summary(summary({
-    provisioned, result, compat,
+    provisioned, result, compat, commit: env.GITHUB_SHA,
     rollback: `Release \`${result.release}\`, deploy \`${result.deployId}\`. Roll back by publishing an earlier release in the Bunny dashboard or with \`POST /compute/script/${provisioned.script.Id}/publish/<release id>\`; each release reads its own deploy folder, so its files come back with it while that folder is kept.`,
     sections: [`### Environment\n- variables: ${result.environment.variables.added.length} added, ${result.environment.variables.changed.length} changed\n- secrets: ${result.environment.secrets.added.length} added, ${result.environment.secrets.updated.length} updated\n- on the script but not in the workflow: ${onlyOnScript.join(", ") || "none"}`],
   }));
@@ -138,7 +138,7 @@ async function runStatic({ options, actions, env, config, api, manifest, compat,
   await actions.setOutput("pull-zone-id", String(provisioned.pullZone.Id));
   await actions.setOutput("storage-zone-id", String(provisioned.storageZone.Id));
   await actions.summary(summary({
-    provisioned, result, compat,
+    provisioned, result, compat, commit: env.GITHUB_SHA,
     rollback: `Deploy \`${result.deployId}\`. Roll back by running the deploy of an earlier commit again: the same build reuses its folder while that folder is kept.`,
     sections: [],
   }));
@@ -205,10 +205,10 @@ export function nameFromRepository(repository = "") {
   return repository.split("/").pop().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "site";
 }
 
-function summary({ provisioned, result, compat, rollback, sections }) {
+function summary({ provisioned, result, compat, commit, rollback, sections }) {
   const list = (items) => (items.length > 0 ? items.map((item) => `- ${item}`).join("\n") : "- none");
   return [
-    `## Deployed to https://${provisioned.hostname}`,
+    `## Deployed ${commit ? `\`${commit.slice(0, 7)}\` ` : ""}to https://${provisioned.hostname}`,
     "",
     rollback,
     "",
