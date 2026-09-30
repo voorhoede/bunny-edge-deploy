@@ -79,6 +79,22 @@ describe("createBunnyApi request basics", () => {
   });
 });
 
+describe("creating a resource", () => {
+  const body = { Name: "zone", Region: "DE", ZoneTier: 0, ReplicationRegions: [] };
+
+  it("looks the resource up by name after a lost response, instead of creating it twice", async () => {
+    const { client, calls } = api([new TypeError("fetch failed"), { json: [{ Id: 7, Name: "zone" }] }]);
+    assert.deepEqual(await client.storageZones.create(body), { Id: 7, Name: "zone" });
+    assert.deepEqual(calls.map((c) => c.method), ["POST", "GET"]);
+  });
+
+  it("creates it again when the lookup after a failed response finds nothing", async () => {
+    const { client, calls } = api([{ status: 502 }, { json: [] }, { status: 201, json: { Id: 8, Name: "zone" } }]);
+    assert.deepEqual(await client.storageZones.create(body), { Id: 8, Name: "zone" });
+    assert.deepEqual(calls.map((c) => c.method), ["POST", "GET", "POST"]);
+  });
+});
+
 describe("find by name", () => {
   it("searches by name and returns only the exact match", async () => {
     const { client, calls } = api([{ json: [{ Id: 1, Name: "site-staging" }, { Id: 2, Name: "site" }] }]);

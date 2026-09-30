@@ -16,7 +16,7 @@ export class BunnyApiError extends Error {
 }
 
 export function createBunnyApi({ apiKey, fetch = globalThis.fetch, sleep } = {}) {
-  async function request(method, path, { body, query } = {}) {
+  async function request(method, path, { body, query, attempts } = {}) {
     const url = new URL(path, BASE_URL);
     for (const [key, value] of Object.entries(query ?? {})) url.searchParams.set(key, String(value));
     return withRetry(async () => {
@@ -28,7 +28,7 @@ export function createBunnyApi({ apiKey, fetch = globalThis.fetch, sleep } = {})
       const payload = await parseBody(response);
       if (!response.ok) throw new BunnyApiError({ status: response.status, path, body: payload });
       return { status: response.status, payload };
-    }, { sleep });
+    }, { sleep, attempts });
   }
 
   const get = (path, query) => request("GET", path, { query }).then((r) => r.payload);
@@ -41,12 +41,26 @@ export function createBunnyApi({ apiKey, fetch = globalThis.fetch, sleep } = {})
     return items.find((item) => item.Name === name);
   };
 
+  // A lost response can hide a create that went through, and creating again would duplicate it or hit the taken name.
+  const create = (path) => async (body) => {
+    try {
+      return (await request("POST", path, { body, attempts: 1 })).payload;
+    } catch (error) {
+      if (!(error.transient || error instanceof TypeError)) throw error;
+      if (error.status !== 429) {
+        const existing = await findByName(path)(body.Name);
+        if (existing) return existing;
+      }
+      return post(path, body);
+    }
+  };
+
   return {
     pullZones: {
       list: () => get("/pullzone").then(toItems),
       findByName: findByName("/pullzone"),
       get: (id) => get(`/pullzone/${id}`),
-      create: (body) => post("/pullzone", body),
+      create: create("/pullzone"),
       update: (id, settings) => post(`/pullzone/${id}`, settings),
       setForceSsl: (id, hostname, forceSsl) => post(`/pullzone/${id}/setForceSSL`, { Hostname: hostname, ForceSSL: forceSsl }),
       addOrUpdateEdgeRule: (id, rule) => post(`/pullzone/${id}/edgerules/addOrUpdate`, rule),
@@ -57,13 +71,13 @@ export function createBunnyApi({ apiKey, fetch = globalThis.fetch, sleep } = {})
     storageZones: {
       findByName: findByName("/storagezone"),
       get: (id) => get(`/storagezone/${id}`),
-      create: (body) => post("/storagezone", body),
+      create: create("/storagezone"),
       update: (id, settings) => post(`/storagezone/${id}`, settings),
     },
     scripts: {
       findByName: findByName("/compute/script"),
       get: (id) => get(`/compute/script/${id}`),
-      create: (body) => post("/compute/script", body),
+      create: create("/compute/script"),
       uploadCode: (id, code) => post(`/compute/script/${id}/code`, { Code: code }),
       publish: (id, note) => post(`/compute/script/${id}/publish`, { Note: note }),
       publishRelease: (id, uuid, note) => post(`/compute/script/${id}/publish/${uuid}`, { Note: note }),
