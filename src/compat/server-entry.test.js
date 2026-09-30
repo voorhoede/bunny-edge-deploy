@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -124,6 +124,39 @@ describe("probeServerEntry runtime probe", () => {
     const result = await probeServerEntry({ path: "/x.js", startupLimitMs: 500, deno: "/definitely/not/deno" });
     assert.equal(result.skipped, true);
     assert.match(result.notice, /deno/i);
+  });
+});
+
+// Stands in for deno, so the probe's handling of the harness can be tested without it.
+async function fakeDeno(script) {
+  const dir = await mkdtemp(join(tmpdir(), "bed-fake-deno-"));
+  const path = join(dir, "deno");
+  await writeFile(path, `#!/bin/sh\n${script}\n`);
+  await chmod(path, 0o755);
+  return path;
+}
+
+describe("probeServerEntry harness handling", () => {
+  it("measures the second of two imports, since the first may download npm: packages", async () => {
+    const deno = await fakeDeno(`count="$(dirname "$0")/count"; n=$(cat "$count" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$count"
+if [ "$n" -eq 1 ]; then echo '{"importMs":900,"registered":{"serve":1}}'; else echo '{"importMs":40,"registered":{"serve":1}}'; fi`);
+    const result = await probeServerEntry({ path: "/x.js", startupLimitMs: 500, deno });
+    assert.equal(result.importMs, 40);
+    assert.deepEqual(result.errors, []);
+  });
+
+  it("reports a harness that printed nothing, with what it wrote to stderr", async () => {
+    const deno = await fakeDeno(`echo "boom from deno" >&2`);
+    const result = await probeServerEntry({ path: "/x.js", startupLimitMs: 500, deno });
+    assert.equal(result.errors.length, 1);
+    assert.match(result.errors[0], /printed nothing.*boom from deno/);
+  });
+
+  it("gives up on a harness that does not finish within the timeout", async () => {
+    const deno = await fakeDeno("sleep 5");
+    const result = await probeServerEntry({ path: "/x.js", startupLimitMs: 500, deno, timeoutMs: 200 });
+    assert.equal(result.errors.length, 1);
+    assert.match(result.errors[0], /did not finish within 0\.2 s/);
   });
 });
 

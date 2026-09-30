@@ -41,16 +41,23 @@ export async function analyzeServerEntry({ path, sizeLimit, coldStartWarnSize = 
   return { errors, warnings, size };
 }
 
-export async function probeServerEntry({ path, startupLimitMs, deno = "deno" }) {
+export async function probeServerEntry({ path, startupLimitMs, deno = "deno", timeoutMs = 120_000 }) {
   const harness = fileURLToPath(new URL("./deno-harness.js", import.meta.url));
+  const importOnce = () => run(deno, ["run", "--quiet", "--allow-all", "--node-modules-dir=none", "--no-lock", harness, path], { maxBuffer: 16 * 1024 * 1024, env: { ...process.env, NO_COLOR: "1" }, timeout: timeoutMs });
   let stdout;
+  let stderr;
   try {
-    ({ stdout } = await run(deno, ["run", "--quiet", "--allow-all", "--node-modules-dir=none", "--no-lock", harness, path], { maxBuffer: 16 * 1024 * 1024, env: { ...process.env, NO_COLOR: "1" } }));
+    // The first import may download npm: packages into Deno's cache, so the second one is timed.
+    await importOnce();
+    ({ stdout, stderr } = await importOnce());
   } catch (error) {
     if (error.code === "ENOENT") return { skipped: true, notice: `startup probe skipped: deno not found at "${deno}"`, errors: [] };
+    if (error.killed) return { skipped: false, errors: [`startup probe did not finish within ${timeoutMs / 1000} s`] };
     return { skipped: false, errors: [`script failed to import in the Deno harness: ${firstLine(error.stderr) || error.message}`] };
   }
-  const result = JSON.parse(stdout.trim().split("\n").at(-1));
+  const line = stdout.trim().split("\n").at(-1);
+  if (!line) return { skipped: false, errors: [`the Deno harness printed nothing${firstLine(stderr) ? `: ${firstLine(stderr)}` : ""}`] };
+  const result = JSON.parse(line);
   const errors = [];
   if (result.error) errors.push(`script failed to import in the Deno harness: ${result.error}`);
   else if (!(result.registered.serve > 0)) errors.push("script registered no request handler when imported: expected a standalone script that calls serve() from @bunny.net/edgescript-sdk");
