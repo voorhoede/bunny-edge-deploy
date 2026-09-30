@@ -1,4 +1,3 @@
-// The variables a Bunny adapter can ask for in requires.env, and where the action gets their values.
 const PLATFORM = [
   { name: "BUNNY_STORAGE_ZONE", value: ({ storageZone }) => storageZone.Name },
   { name: "BUNNY_STORAGE_HOST", value: ({ storageZone }) => storageZone.StorageHostname },

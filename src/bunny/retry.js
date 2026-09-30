@@ -2,7 +2,7 @@ const BACKOFF_MS = [500, 1000, 2000];
 
 export const isTransientStatus = (status) => status === 429 || status >= 500;
 
-/** Retries `attempt` on transient failures. `attempt` must throw an error with `transient: true` to be retried. */
+/** Retries `attempt` when it throws an error marked `transient: true` or a network `TypeError`. */
 export async function withRetry(attempt, { attempts = 3, sleep = defaultSleep } = {}) {
   for (let index = 0; ; index += 1) {
     try {

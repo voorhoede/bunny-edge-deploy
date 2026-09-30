@@ -1,7 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-// Mirrors BuildManifestSchema in BunnyWay/cli#172 (packages/config/src/build-manifest.ts); unknown fields are ignored like zod does.
+// Unknown fields are ignored, so a field a newer adapter adds does not fail the run.
 const MANIFEST_VERSION = 1;
 const PULL_ZONE_SETTINGS = ["disableCookies", "enableSmartCache", "enableCacheSlice"];
 

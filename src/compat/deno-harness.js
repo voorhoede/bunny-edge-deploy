@@ -1,4 +1,4 @@
-// Mimics the Bunny runtime entry point: a Bunny global whose v1 API records what the script registers.
+// Mimics the Bunny runtime entry point; only serve() is counted, so a middleware script registers no handler.
 let served = 0;
 globalThis.Bunny = {
   v1: {

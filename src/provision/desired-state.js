@@ -7,7 +7,7 @@ export function desiredStorageZone({ name, region = "DE", tier = "standard", rep
   return { Name: name, Region: region, ZoneTier: TIERS[tier], ReplicationRegions: replicationRegions };
 }
 
-// The settings a build names in requires.pullZone, plus the override that would otherwise cache every response regardless of its headers.
+// -1 makes the zone follow the script's Cache-Control; any other value caches every response that long, private ones included.
 export function requiredPullZoneSettings(requirements = {}) {
   const named = Object.entries(REQUIRED_SETTINGS).filter(([key]) => typeof requirements[key] === "boolean").map(([key, field]) => [field, requirements[key]]);
   return { CacheControlMaxAgeOverride: -1, ...Object.fromEntries(named) };

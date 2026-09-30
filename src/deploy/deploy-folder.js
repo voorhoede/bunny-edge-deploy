@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 const sha256 = (data) => createHash("sha256").update(data).digest("hex");
 
-// Same content hash as BunnyWay/cli#172 (lab/astro/upload.ts), so the same build always lands in the same folder.
+// A content hash, so a re-run of the same build lands in the same folder and uploads nothing.
 export function deployId({ files, bundle }) {
   const lines = [...files]
     .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))

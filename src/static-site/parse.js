@@ -1,8 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-// The `_headers` and `_redirects` formats that static hosts read and Bunny's Astro adapter writes.
-
 const contentLines = (text) => text.split(/\r?\n/).filter((line) => line.trim() !== "" && !line.trimStart().startsWith("#"));
 
 export function parseHeaders(text = "") {
