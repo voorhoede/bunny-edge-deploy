@@ -1,5 +1,6 @@
-import { DEPLOY_HEADER } from "./rules.js";
+import { DEPLOY_HEADER, RULE_PREFIX } from "./rules.js";
 
+const RULE_LIMIT = 50;
 const PROBE_INTERVAL_MS = 1500;
 const PROBE_DEADLINE_MS = 20_000;
 // Bunny's CLI waits at least this long before the second purge: configuration reaches the nodes in batches of about 5 s.
@@ -9,9 +10,18 @@ const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function publishStaticSite({ api, fetch = globalThis.fetch, sleep = defaultSleep, now = Date.now, pullZone, storageZone, hostname, deployId, rules, notFound }) {
   const { EdgeRules: current = [] } = await api.pullZones.get(pullZone.Id);
+  const owned = current.filter((existing) => existing.Description?.startsWith(RULE_PREFIX));
+  const others = current.length - owned.length;
+  if (rules.length + others > RULE_LIMIT) {
+    throw new Error(`publishing would need ${rules.length + others} edge rules on the pull zone, but Bunny allows ${RULE_LIMIT}: ${rules.length} from this deploy and ${others} other rules on the zone; shorten _redirects or ask Bunny support to raise the limit`);
+  }
+
   for (const rule of rules) {
-    const existing = current.find((candidate) => candidate.Description === rule.Description);
+    const existing = owned.find((candidate) => candidate.Description === rule.Description);
     await api.pullZones.addOrUpdateEdgeRule(pullZone.Id, existing ? { ...rule, Guid: existing.Guid } : rule);
+  }
+  for (const stale of owned.filter((existing) => !rules.some((rule) => rule.Description === existing.Description))) {
+    await api.pullZones.deleteEdgeRule(pullZone.Id, stale.Guid);
   }
 
   const zone = await api.storageZones.get(storageZone.Id);

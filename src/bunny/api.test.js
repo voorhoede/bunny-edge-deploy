@@ -147,6 +147,13 @@ describe("pull zones and purge", () => {
     assert.deepEqual(JSON.parse(calls[1].body), { CacheTag: "ssr" });
   });
 
+  it("deletes an edge rule by its Guid", async () => {
+    const { client, calls } = api([{ status: 204 }]);
+    await client.pullZones.deleteEdgeRule(33, "0d6e9b7e-guid");
+    assert.equal(calls[0].method, "DELETE");
+    assert.equal(calls[0].url, "https://api.bunny.net/pullzone/33/edgerules/0d6e9b7e-guid");
+  });
+
   it("forces ssl per hostname", async () => {
     const { client, calls } = api([{ status: 204 }]);
     await client.pullZones.setForceSsl(3, "site.b-cdn.net", true);

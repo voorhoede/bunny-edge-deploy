@@ -3,7 +3,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { analyzeClientDir } from "../compat/client-dir.js";
 import { publishStaticSite } from "../static-site/publish.js";
-import { notFoundSettings, siteRules } from "../static-site/rules.js";
+import { parseHeaders, parseRedirects } from "../static-site/parse.js";
+import { notFoundSettings, redirectingPages, siteRules } from "../static-site/rules.js";
 import { deployFolder, deployId, foldersToPrune, preamble } from "./deploy-folder.js";
 import { syncEnvironment } from "./env-sync.js";
 import { smokeTest } from "./smoke.js";
@@ -55,9 +56,15 @@ export async function deployStatic({
   const id = deployId({ files: local });
   const plan = await uploadToFolder({ storage, local, id, concurrency, sleep, log });
 
+  const text = (path) => local.find((f) => f.path === path)?.bytes.toString("utf8");
+  const headers = parseHeaders(text("_headers"));
+  const redirects = parseRedirects(text("_redirects"));
+  const unredirected = redirectingPages(headers);
+  if (unredirected.length > 0) log(`not redirected by the CDN, only by the page's own meta refresh: ${unredirected.join(", ")}`);
+
   const { confirmed } = await publish({
     api, fetch, sleep, pullZone, storageZone, hostname, deployId: id,
-    rules: siteRules({ storageZone, deployId: id }),
+    rules: siteRules({ storageZone, deployId: id, headers, redirects }),
     notFound: notFoundSettings({ deployId: id, files: local.map((f) => f.path) }),
   });
   log(confirmed ? `published deploy ${id}` : `published deploy ${id}, but the site did not report it within 20 s; the smoke test decides`);

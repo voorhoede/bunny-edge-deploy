@@ -50,6 +50,7 @@ export function createBunnyApi({ apiKey, fetch = globalThis.fetch, sleep } = {})
       update: (id, settings) => post(`/pullzone/${id}`, settings),
       setForceSsl: (id, hostname, forceSsl) => post(`/pullzone/${id}/setForceSSL`, { Hostname: hostname, ForceSSL: forceSsl }),
       addOrUpdateEdgeRule: (id, rule) => post(`/pullzone/${id}/edgerules/addOrUpdate`, rule),
+      deleteEdgeRule: (id, guid) => del(`/pullzone/${id}/edgerules/${guid}`),
       purgeAll: (id) => post(`/pullzone/${id}/purgeCache`, {}),
       purgeTag: (id, tag) => post(`/pullzone/${id}/purgeCache`, { CacheTag: tag }),
     },

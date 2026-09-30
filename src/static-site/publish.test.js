@@ -11,6 +11,7 @@ function fakes({ edgeRules = [], storageZoneSettings = { Custom404FilePath: null
     pullZones: {
       get: async () => ({ Id: 33, EdgeRules: edgeRules }),
       addOrUpdateEdgeRule: async (id, body) => events.push(["rule", body.Description, body.Guid]),
+      deleteEdgeRule: async (id, guid) => events.push(["delete", guid]),
       purgeAll: async () => events.push(["purge"]),
     },
     storageZones: {
@@ -49,6 +50,25 @@ describe("publishStaticSite", () => {
     const same = fakes({ storageZoneSettings: common.notFound });
     await publishStaticSite({ ...same, ...common, rules: desired });
     assert.ok(!same.events.some((e) => e[0] === "404"));
+  });
+
+  it("deletes the rules it owns that the new deploy no longer has, after adding the new ones", async () => {
+    const f = fakes({ edgeRules: [
+      { ...rule("bunny-edge-deploy: redirect /old"), Guid: "g-old" },
+      { ...rule("bunny-edge-deploy: serve the published deploy"), Guid: "g-serve" },
+      { ...rule("force www"), Guid: "g-mine" },
+    ] });
+    await publishStaticSite({ ...f, ...common, rules: desired });
+    const kinds = f.events.map((e) => e[0]);
+    assert.deepEqual(f.events.filter((e) => e[0] === "delete"), [["delete", "g-old"]]);
+    assert.ok(kinds.lastIndexOf("rule") < kinds.indexOf("delete"));
+  });
+
+  it("refuses before changing anything when its rules and the zone's other rules pass Bunny's limit of 50", async () => {
+    const others = Array.from({ length: 49 }, (_, i) => ({ ...rule(`someone else's rule ${i}`), Guid: `g-${i}` }));
+    const f = fakes({ edgeRules: others });
+    await assert.rejects(publishStaticSite({ ...f, ...common, rules: desired }), /51 edge rules.*50.*2 from this deploy.*49 other/);
+    assert.deepEqual(f.events, []);
   });
 
   it("purges, waits until the site answers with the new deploy, at least 7.5 s, and purges again", async () => {

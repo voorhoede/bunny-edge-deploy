@@ -175,6 +175,16 @@ describe("deployStatic", () => {
     assert.deepEqual(result.pruned, ["000000000001"]);
   });
 
+  it("publishes the build's _headers and _redirects as rules, and names pages whose redirect cannot be applied", async () => {
+    const manifest = await staticBuild({ ...site, "_redirects": "/old /about 301!\n", "_headers": "/\n  location: /en/\n" });
+    const { storage, api, fetch, sleep } = fakes();
+    const publishes = [];
+    const lines = [];
+    await deployStatic({ api, storage, fetch, sleep, log: (line) => lines.push(line), publish: async (args) => { publishes.push(args); return { confirmed: true }; }, manifest, ...staticCommon });
+    assert.ok(publishes[0].rules.some((rule) => rule.Description === "bunny-edge-deploy: redirect /old"));
+    assert.ok(lines.some((line) => /not redirected.*\//.test(line)));
+  });
+
   it("fails and prunes nothing when the smoke test fails", async () => {
     const manifest = await staticBuild(site);
     const { storage, api, sleep, events } = fakes({ folders: [{ name: "000000000001", created: "2026-09-01T00:00:00" }] });
