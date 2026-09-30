@@ -16,6 +16,11 @@ Sources: official OpenAPI specs (`https://core-api-public-docs.b-cdn.net/docs/v3
 - Rollback restores code and files together when each release names its own storage folder: after deploying a changed build to `deploys/<new>/` and publishing the previous release by id, the site served the old page and the old hashed CSS.
 - `DELETE https://storage.bunnycdn.com/<zone>/deploys/<id>/` (trailing slash) deletes the folder and everything in it (200).
 
+### Loading an npm package at runtime instead of bundling it (2026-09-30, Shiki 4.4.3 behind `@bunny.net/astro-adapter`)
+- A script that keeps `import ... from "npm:shiki@4.4.3"` (plus `/langs`, `/engine/oniguruma` and a dynamic `import("npm:shiki@4.4.3/wasm")`) instead of bundling Shiki boots and highlights code on Bunny. Grammars that the package loads with dynamic imports were fetched on first use at request time (js, python, rust, go, ruby, sql all rendered). The script stayed at 2.95 MB, where bundling Shiki made it 12.85 MB.
+- The import runs when an isolate starts, so every route pays for it on a cold start: 15 requests to a cheap on-demand route took median 0.44 s and max 0.99 s, against median 0.27 s and max 0.30 s for the same site with Shiki left out.
+- In the local Deno harness the first import took 846 ms while Deno downloaded the package and 37 ms once cached, so the startup probe fails on a fresh CI runner.
+
 ### A suspended account (2026-09-30, trial account without a verified card)
 - `GET /user` reported `Suspended: true` in the middle of a test run, with no error from any API call before it.
 - The pull zone then reported `Enabled: false` and answered 403, and Storage rejected the zone's own passwords with 401 on every path, so a deploy looks like a storage zone that is not ready yet.
