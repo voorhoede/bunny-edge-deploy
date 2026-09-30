@@ -16,6 +16,16 @@ Sources: official OpenAPI specs (`https://core-api-public-docs.b-cdn.net/docs/v3
 - Rollback restores code and files together when each release names its own storage folder: after deploying a changed build to `deploys/<new>/` and publishing the previous release by id, the site served the old page and the old hashed CSS.
 - `DELETE https://storage.bunnycdn.com/<zone>/deploys/<id>/` (trailing slash) deletes the folder and everything in it (200).
 
+### Static site on a storage-origin pull zone with edge rules (2026-09-30, storage zone 1955601, pull zone 6716544, deleted)
+- `POST /pullzone` accepts `CacheControlMaxAgeOverride: 2592000` and `CacheControlPublicMaxAgeOverride: 0` at creation. With them, HTML and other files answer `public, max-age=0`; an `OverrideBrowserCacheTime` (16) rule with `ActionParameter1: "31536000"` on Url `*/_astro/*` makes those answer `public, max-age=31536000` (no `immutable`).
+- An `OriginStorage` (17) rule with `ActionParameter3: /deploys/<id>/` and trigger Url `*/deploys/*` with MatchNone serves `/about/` and `/about` both from `about/index.html` with 200, no redirect, nested paths too.
+- `SetResponseHeader` (5) with six `ExtraActions` is accepted. Its headers reach the browser on MISS and HIT, and on redirect and 404 responses. A rule on Url `*://*/about` and `*://*/about/` adds its header to that page only.
+- `Redirect` (1): `ActionParameter1` must be an absolute URL. `/about/` and `https://{{hostname}}/about/` are refused with 400 "The entered path is not a valid URL."; `%{Url.Scheme}://%{Url.Hostname}/…` is stored with `http://` in front. `https://%{Url.Hostname}/about/` works and redirects to the requested host. `ActionParameter2` sets the status (301 and 302 checked).
+- The trigger `*://*/old` also matches `/x/old`. `pattern:^https?://[^/]+/gone/?$` matches `/gone` and `/gone/` only.
+- `BlockRequest` (4) on `*/_headers`, `*/_redirects` and `*/deploys/*` answers 403.
+- `POST /storagezone/{id} {Custom404FilePath: "/deploys/<id>/404.html", Rewrite404To200: false}` (204) made missing paths answer 404 with that page within 10 s.
+- `addOrUpdate` with an existing rule's `Guid` updates it in place.
+
 ### Loading an npm package at runtime instead of bundling it (2026-09-30, Shiki 4.4.3 behind `@bunny.net/astro-adapter`)
 - A script that keeps `import ... from "npm:shiki@4.4.3"` (plus `/langs`, `/engine/oniguruma` and a dynamic `import("npm:shiki@4.4.3/wasm")`) instead of bundling Shiki boots and highlights code on Bunny. Grammars that the package loads with dynamic imports were fetched on first use at request time (js, python, rust, go, ruby, sql all rendered). The script stayed at 2.95 MB, where bundling Shiki made it 12.85 MB.
 - The import runs when an isolate starts, so every route pays for it on a cold start: 15 requests to a cheap on-demand route took median 0.44 s and max 0.99 s, against median 0.27 s and max 0.30 s for the same site with Shiki left out.
