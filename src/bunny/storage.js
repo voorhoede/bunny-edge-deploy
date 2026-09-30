@@ -29,6 +29,15 @@ export function createStorageClient({ hostname, zoneName, password, fetch = glob
     return response.json();
   }
 
+  async function listFolders(directory) {
+    try {
+      return (await listDirectory(directory)).filter((e) => e.IsDirectory).map((e) => ({ name: e.ObjectName, created: e.DateCreated }));
+    } catch (error) {
+      if (error.status === 404) return [];
+      throw error;
+    }
+  }
+
   async function listAll(directory = "") {
     let entries;
     try {
@@ -45,6 +54,7 @@ export function createStorageClient({ hostname, zoneName, password, fetch = glob
 
   return {
     listAll,
+    listFolders,
     upload: async (path, bytes, { contentType }) => {
       const checksum = createHash("sha256").update(bytes).digest("hex").toUpperCase();
       await send("PUT", path, { headers: { "Content-Type": contentType, Checksum: checksum }, body: bytes });
@@ -59,6 +69,9 @@ export function createStorageClient({ hostname, zoneName, password, fetch = glob
     },
     remove: async (path) => {
       await send("DELETE", path);
+    },
+    removeFolder: async (path) => {
+      await send("DELETE", `${path}/`);
     },
   };
 }

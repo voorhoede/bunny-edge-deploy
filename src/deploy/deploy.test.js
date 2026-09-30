@@ -20,12 +20,14 @@ async function build(files) {
 
 const checksum = (text) => createHash("sha256").update(text).digest("hex").toUpperCase();
 
-function fakes({ remote = () => [] } = {}) {
+function fakes({ remote = () => [], folders = [] } = {}) {
   const events = [];
   let inFlight = 0;
   let maxInFlight = 0;
   const storage = {
     listAll: async (directory) => { events.push(["list", directory]); return remote(directory); },
+    listFolders: async (directory) => { events.push(["listFolders", directory]); return folders; },
+    removeFolder: async (path) => events.push(["removeFolder", path]),
     upload: async (path, bytes, { contentType }) => {
       inFlight += 1;
       maxInFlight = Math.max(maxInFlight, inFlight);
@@ -63,7 +65,7 @@ describe("deploy", () => {
     assert.deepEqual(events.filter((e) => e[0] === "list").map((e) => e[1]), [folder]);
     assert.deepEqual(events.filter((e) => e[0] === "upload").map((e) => [e[1], e[2]]).sort(), [[`${folder}/_astro/about.DFbA8egk.css`, "text/css; charset=utf-8"], [`${folder}/about/index.html`, "text/html; charset=utf-8"]]);
     const order = events.map((e) => (e[0] === "sleep" ? `sleep ${e[1]}` : e[0])).filter((k, i, all) => k !== all[i - 1]);
-    assert.deepEqual(order.slice(order.indexOf("upload")), ["upload", "var", "secret", "uploadCode", "publish", "purgeAll", "sleep 5000", "purgeAll", "smoke"]);
+    assert.deepEqual(order.slice(order.indexOf("upload")), ["upload", "var", "secret", "uploadCode", "publish", "purgeAll", "sleep 5000", "purgeAll", "smoke", "listFolders"]);
     assert.equal(events.find((e) => e[0] === "publish")[1], "deploy 1");
     assert.equal(result.release, "sjSMbTEz");
     assert.deepEqual(result.uploaded.sort(), ["_astro/about.DFbA8egk.css", "about/index.html"]);
@@ -92,6 +94,28 @@ describe("deploy", () => {
     const rerun = await deploy({ ...complete, manifest, environment: { variables: [], secrets: [] }, ...common });
     assert.deepEqual(rerun.uploaded, []);
     assert.ok(complete.events.some((e) => e[0] === "publish"));
+  });
+
+  it("prunes old deploy folders once the smoke test has passed, keeping the live one", async () => {
+    const manifest = await build(files);
+    const old = [{ name: "000000000001", created: "2026-09-01T00:00:00" }, { name: "000000000002", created: "2026-09-02T00:00:00" }, { name: "000000000003", created: "2026-09-03T00:00:00" }];
+    const probe = fakes();
+    const { deployId } = await deploy({ ...probe, manifest, environment: { variables: [], secrets: [] }, ...common });
+    const { storage, api, fetch, sleep, events } = fakes({ folders: [...old, { name: deployId, created: "2026-08-01T00:00:00" }] });
+    const result = await deploy({ api, storage, fetch, sleep, manifest, environment: { variables: [], secrets: [] }, ...common, keepDeploys: 2 });
+    const kinds = events.map((e) => e[0]);
+    assert.ok(kinds.lastIndexOf("smoke") < kinds.indexOf("listFolders"));
+    assert.deepEqual(events.filter((e) => e[0] === "listFolders").map((e) => e[1]), ["deploys"]);
+    assert.deepEqual(events.filter((e) => e[0] === "removeFolder").map((e) => e[1]).sort(), ["deploys/000000000001"]);
+    assert.deepEqual(result.pruned, ["000000000001"]);
+  });
+
+  it("prunes nothing when the smoke test fails, so the previous deploy stays available", async () => {
+    const manifest = await build(files);
+    const { storage, api, sleep, events } = fakes({ folders: [{ name: "000000000001", created: "2026-09-01T00:00:00" }] });
+    const fetch = async () => new Response("nope", { status: 500, headers: { "cdn-cache": "MISS" } });
+    await assert.rejects(deploy({ api, storage, fetch, sleep, manifest, environment: { variables: [], secrets: [] }, ...common, keepDeploys: 1, smokeRetryForMs: 0 }), /smoke test failed/);
+    assert.ok(!events.some((e) => e[0] === "listFolders" || e[0] === "removeFolder"));
   });
 
   it("bounds upload concurrency", async () => {

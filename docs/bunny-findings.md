@@ -71,6 +71,7 @@ Sources: official OpenAPI specs (`https://core-api-public-docs.b-cdn.net/docs/v3
 - Requires the zone `Password` as `AccessKey`; the account API key returns 401.
 - `Checksum` upload header is uppercase hex SHA-256; mismatch returns 400.
 - Directory listing returns `Checksum` = uppercase hex SHA-256 of the content (verified equal to a local hash) and `ContentType` empty. Listing is per directory, not recursive.
+- A folder in a listing has `DateCreated` and `LastChanged` from when it was first created, in UTC without a zone suffix and with two or three decimals (`2026-09-30T08:37:34.39`). Uploading more files into it later changes neither (2026-09-30).
 - Limits (docs): 100 concurrent connections per IP, 5 concurrent listings, 30 concurrent deletes, 6000-char paths.
 
 ### Other

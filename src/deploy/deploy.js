@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { analyzeClientDir } from "../compat/client-dir.js";
-import { deployFolder, deployId, preamble } from "./deploy-folder.js";
+import { deployFolder, deployId, foldersToPrune, preamble } from "./deploy-folder.js";
 import { syncEnvironment } from "./env-sync.js";
 import { smokeTest } from "./smoke.js";
 import { contentTypeFor, isHashedAsset, planUpload } from "./upload-plan.js";
@@ -15,7 +15,7 @@ const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 export async function deploy({
   api, storage, fetch, log = () => {}, sleep = defaultSleep,
   manifest, site, pullZone, hostname, scriptId,
-  environment, concurrency = 8,
+  environment, concurrency = 8, keepDeploys = 3,
   serverRoute = "/", smokeStaticPath, smokeRetryForMs, note,
 }) {
   const local = await readLocalFiles(manifest.assets.dir);
@@ -43,7 +43,11 @@ export async function deploy({
   const smoke = await smokeTest({ hostname, staticPath, serverRoute, fetch, sleep, retryForMs: smokeRetryForMs });
   if (smoke.errors.length > 0) throw new Error(`smoke test failed:\n${smoke.errors.join("\n")}`);
 
-  return { deployId: id, uploaded: plan.upload.map((f) => f.path), unchanged: plan.unchanged, environment: env, release, smoke };
+  const pruned = foldersToPrune({ folders: await storage.listFolders("deploys"), current: id, keep: keepDeploys });
+  for (const name of pruned) await storage.removeFolder(deployFolder(name));
+  if (pruned.length > 0) log(`pruned ${pruned.length} old deploy folders: ${pruned.join(", ")}`);
+
+  return { deployId: id, uploaded: plan.upload.map((f) => f.path), unchanged: plan.unchanged, pruned, environment: env, release, smoke };
 }
 
 async function readLocalFiles(clientDir) {

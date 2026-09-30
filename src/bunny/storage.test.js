@@ -83,6 +83,19 @@ describe("storage list", () => {
     assert.equal(calls[0].url, "https://storage.bunnycdn.com/site/deploys/689f0795086f/");
   });
 
+  it("lists the folders in one directory with the date each was created", async () => {
+    const { client, calls } = storage([{ json: [
+      { ObjectName: "aaaaaaaaaaaa", IsDirectory: true, DateCreated: "2026-09-30T08:33:59.427" },
+      { ObjectName: "stray.txt", IsDirectory: false, DateCreated: "2026-09-30T08:34:00.000" },
+      { ObjectName: "bbbbbbbbbbbb", IsDirectory: true, DateCreated: "2026-09-30T08:34:03.201" },
+    ] }]);
+    assert.deepEqual(await client.listFolders("deploys"), [{ name: "aaaaaaaaaaaa", created: "2026-09-30T08:33:59.427" }, { name: "bbbbbbbbbbbb", created: "2026-09-30T08:34:03.201" }]);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "https://storage.bunnycdn.com/site/deploys/");
+    const { client: empty } = storage([{ status: 404 }]);
+    assert.deepEqual(await empty.listFolders("deploys"), []);
+  });
+
   it("treats a 404 on the root as an empty zone", async () => {
     const { client } = storage([{ status: 404, json: [{ HttpCode: 404, Message: "Not found" }] }]);
     assert.deepEqual(await client.listAll(), []);
@@ -104,5 +117,12 @@ describe("storage remove", () => {
     await client.remove("assets/old.js");
     assert.equal(calls[0].method, "DELETE");
     assert.equal(calls[0].url, "https://storage.bunnycdn.com/site/assets/old.js");
+  });
+
+  it("DELETEs a folder and everything in it through its path with a trailing slash", async () => {
+    const { client, calls } = storage([{ status: 200 }]);
+    await client.removeFolder("deploys/aaaaaaaaaaaa");
+    assert.equal(calls[0].method, "DELETE");
+    assert.equal(calls[0].url, "https://storage.bunnycdn.com/site/deploys/aaaaaaaaaaaa/");
   });
 });

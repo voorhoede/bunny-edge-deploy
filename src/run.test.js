@@ -38,8 +38,8 @@ function harness() {
       return { storageZone: { Id: 1, Name: "n", Password: "rw-pw", ReadOnlyPassword: "ro-pw", StorageHostname: "storage.bunnycdn.com" }, script: { Id: 2 }, pullZone: { Id: 3 }, hostname: "n.b-cdn.net", created: ["storage zone n"], updated: ["pull zone n: DisableCookies true -> false"], drift: [], warnings: [] };
     },
     deploy: async (args) => {
-      calls.push(["deploy", { environment: args.environment, site: args.site, manifest: args.manifest }]);
-      return { deployId: "689f0795086f", uploaded: ["index.html"], unchanged: [], release: "sjSMbTEz", environment: { variables: { added: ["A"], changed: [], unchanged: [] }, secrets: { added: ["S"], updated: [] }, notInInput: { variables: [], secrets: [] } }, smoke: { checks: [], errors: [], warnings: [] } };
+      calls.push(["deploy", { environment: args.environment, site: args.site, manifest: args.manifest, keepDeploys: args.keepDeploys }]);
+      return { deployId: "689f0795086f", uploaded: ["index.html"], unchanged: [], pruned: [], release: "sjSMbTEz", environment: { variables: { added: ["A"], changed: [], unchanged: [] }, secrets: { added: ["S"], updated: [] }, notInInput: { variables: [], secrets: [] } }, smoke: { checks: [], errors: [], warnings: [] } };
     },
     probeServerEntry: async () => ({ skipped: true, notice: "deno missing", errors: [] }),
     createBunnyApi: () => ({}),
@@ -62,6 +62,7 @@ describe("run", () => {
     assert.ok(lines.some((l) => /updated pull zone n: DisableCookies true -> false/.test(l)));
     assert.equal(calls[1][0], "deploy");
     assert.equal(calls[1][1].site, "my-site");
+    assert.equal(calls[1][1].keepDeploys, 3);
     assert.equal(calls[1][1].manifest.kind, "ssr");
     assert.deepEqual(calls[1][1].environment, {
       variables: [{ name: "BUNNY_STORAGE_ZONE", value: "n" }, { name: "BUNNY_STORAGE_HOST", value: "storage.bunnycdn.com" }, { name: "A", value: "1" }],
@@ -106,6 +107,14 @@ describe("run", () => {
     assert.ok(!supplied.lines.some((l) => /warning:.*BUNNY_API_KEY/.test(l)));
   });
 
+  it("refuses to keep fewer than one deploy folder", async () => {
+    const path = await project();
+    const { actions, deps, calls, lines } = harness();
+    await assert.rejects(run({ inputs: { "build-manifest": path, "bunny-api-key": "key", "keep-deploys": 0 }, actions, ...deps }), /compatibility check failed/);
+    assert.deepEqual(calls, []);
+    assert.ok(lines.some((l) => /error:.*keep-deploys.*at least 1/.test(l)));
+  });
+
   it("derives the resource name from the repository when no name is given", async () => {
     const path = await project();
     const { actions, deps, calls } = harness();
@@ -116,8 +125,9 @@ describe("run", () => {
   it("passes the name and zone overrides through", async () => {
     const path = await project();
     const { actions, deps, calls } = harness();
-    const inputs = { "build-manifest": path, "bunny-api-key": "key", name: "s", "pull-zone-name": "cdn-s", "pricing-regions": ["EU", "US"], "replication-regions": ["UK"], "monthly-bandwidth-limit-gb": 100 };
+    const inputs = { "build-manifest": path, "bunny-api-key": "key", name: "s", "pull-zone-name": "cdn-s", "pricing-regions": ["EU", "US"], "replication-regions": ["UK"], "monthly-bandwidth-limit-gb": 100, "keep-deploys": 5 };
     await run({ inputs, actions, ...deps });
+    assert.equal(calls[1][1].keepDeploys, 5);
     assert.equal(calls[0][1].config.pullZoneName, "cdn-s");
     assert.equal(calls[0][1].config.storageZoneName, "s");
     assert.deepEqual(calls[0][1].config.replicationRegions, ["UK"]);

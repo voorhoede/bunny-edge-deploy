@@ -27,6 +27,7 @@ export const INPUT_SCHEMA = {
   "stale-while-updating": { type: "boolean", default: false },
   "script-size-limit-mb": { type: "integer", default: 8 },
   "startup-limit-ms": { type: "integer", default: 500 },
+  "keep-deploys": { type: "integer", default: 3 },
   "smoke-route": { default: "/" },
   "smoke-static-path": { default: "" },
   concurrency: { type: "integer", default: 8 },
@@ -79,7 +80,7 @@ export async function run({
     manifest, site: config.pullZoneName,
     pullZone: provisioned.pullZone, hostname: provisioned.hostname, scriptId: provisioned.script.Id,
     environment: { variables: [...platform.variables, ...environment.variables], secrets: [...platform.secrets, ...environment.secrets] },
-    concurrency: options.concurrency,
+    concurrency: options.concurrency, keepDeploys: options["keep-deploys"],
     serverRoute: options["smoke-route"], smokeStaticPath: options["smoke-static-path"] || undefined,
     note: options["release-note"] || `${env.GITHUB_REPOSITORY ?? "bunny-edge-deploy"}@${(env.GITHUB_SHA ?? "").slice(0, 7)} run ${env.GITHUB_RUN_NUMBER ?? ""}`.trim(),
   }));
@@ -103,6 +104,7 @@ async function checkCompatibility({ options, environment, actions, probeServerEn
   const read = await readBuildManifest(resolve(options["build-manifest"]));
   const collisions = [...environment.variables, ...environment.secrets].filter((e) => PLATFORM_NAMES.has(e.name)).map((e) => `"${e.name}" is set by the action from the storage and pull zone; remove it from env and secrets`);
   const errors = [...read.errors, ...environment.errors, ...collisions];
+  if (options["keep-deploys"] < 1) errors.push(`keep-deploys is ${options["keep-deploys"]}, but it must be at least 1 so the live deploy keeps its files`);
   const warnings = [];
   if (read.errors.length === 0) {
     const { manifest } = read;
@@ -136,7 +138,7 @@ function summary({ provisioned, result, compat }) {
     "",
     `Release \`${result.release}\`, deploy \`${result.deployId}\`. Roll back by publishing an earlier release in the Bunny dashboard or with \`POST /compute/script/${provisioned.script.Id}/publish/<release id>\`; each release reads its own deploy folder, so its files come back with it while that folder is kept.`,
     "",
-    `### Files\n- uploaded ${result.uploaded.length} to \`deploys/${result.deployId}/\`, ${result.unchanged.length} already there`,
+    `### Files\n- uploaded ${result.uploaded.length} to \`deploys/${result.deployId}/\`, ${result.unchanged.length} already there\n- pruned ${result.pruned.length} old deploy folders${result.pruned.length > 0 ? `: ${result.pruned.join(", ")}` : ""}`,
     "",
     `### Environment\n- variables: ${result.environment.variables.added.length} added, ${result.environment.variables.changed.length} changed\n- secrets: ${result.environment.secrets.added.length} added, ${result.environment.secrets.updated.length} updated\n- on the script but not in the workflow: ${[...result.environment.notInInput.variables, ...result.environment.notInInput.secrets].join(", ") || "none"}`,
     "",

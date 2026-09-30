@@ -57,6 +57,9 @@ inputs:
   startup-limit-ms:
     description: Fail when importing the script in a local Deno harness takes longer than this. Only runs when `deno` is on the PATH.
     default: "500"
+  keep-deploys:
+    description: Deploy folders to keep in the storage zone, newest first, and with them the releases you can roll back to. The live deploy is always kept. Older folders are deleted after a deploy passes its smoke test.
+    default: "3"
   smoke-route:
     description: Server-rendered route requested by the smoke test after the deploy.
     default: /

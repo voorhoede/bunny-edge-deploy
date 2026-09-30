@@ -15,3 +15,10 @@ export const deployFolder = (id) => `deploys/${id}`;
 
 // The adapter reads this global at startup to find its files, so every release carries its own folder.
 export const preamble = ({ id, site }) => `globalThis.__BUNNY_DEPLOY__ = ${JSON.stringify({ id, assetPrefix: deployFolder(id), site, environment: "production" })};\n`;
+
+// A build identical to an earlier one reuses that older folder, so the live deploy is kept by id, not by date.
+export function foldersToPrune({ folders, current, keep }) {
+  const newestFirst = [...folders].sort((a, b) => Date.parse(b.created) - Date.parse(a.created));
+  const kept = new Set([current, ...newestFirst.slice(0, keep).map((folder) => folder.name)]);
+  return newestFirst.filter((folder) => !kept.has(folder.name)).map((folder) => folder.name);
+}
