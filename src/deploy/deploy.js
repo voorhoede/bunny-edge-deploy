@@ -2,52 +2,48 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { analyzeClientDir } from "../compat/client-dir.js";
+import { deployFolder, deployId, preamble } from "./deploy-folder.js";
 import { syncEnvironment } from "./env-sync.js";
-import { purgeUrls } from "./purge.js";
-import { reconcileRetention } from "./retention.js";
 import { smokeTest } from "./smoke.js";
 import { contentTypeFor, isHashedAsset, planUpload } from "./upload-plan.js";
 
-export const STATE_PATH = ".bunny-edge-deploy/state.json";
+// A publish takes a few seconds to reach every node, so the cache is purged again once the old release is gone.
+const SETTLE_MS = 5000;
+
+const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function deploy({
-  api, storage, fetch, log = () => {},
-  clientDir, serverEntry, pullZone, hostname, scriptId,
-  environment,
-  keepStaleDeploys = 3, concurrency = 8,
-  purge = "full", cacheTag,
-  serverRoute = "/", smokeStaticPath, smokeRetryForMs, note, sleep,
+  api, storage, fetch, log = () => {}, sleep = defaultSleep,
+  manifest, site, pullZone, hostname, scriptId,
+  environment, concurrency = 8,
+  serverRoute = "/", smokeStaticPath, smokeRetryForMs, note,
 }) {
-  const local = await readLocalFiles(clientDir);
-  const remote = await listWhenReady(storage, sleep);
-  const plan = planUpload({ local, remote, statePath: STATE_PATH });
-  log(`uploading ${plan.upload.length} files, ${plan.unchanged.length} unchanged`);
-  await inBatches(plan.upload.filter((f) => isHashedAsset(f.path)), concurrency, (file) => storage.upload(file.path, file.bytes, { contentType: contentTypeFor(file.path) }));
-  await inBatches(plan.upload.filter((f) => !isHashedAsset(f.path)), concurrency, (file) => storage.upload(file.path, file.bytes, { contentType: contentTypeFor(file.path) }));
+  const local = await readLocalFiles(manifest.assets.dir);
+  const bundle = await readFile(manifest.script.entry, "utf8");
+  const id = deployId({ files: local, bundle });
+  const folder = deployFolder(id);
+  const remote = (await listWhenReady(storage, folder, sleep)).map((file) => ({ ...file, path: file.path.slice(folder.length + 1) }));
+  const plan = planUpload({ local, remote });
+  log(`deploy ${id}: uploading ${plan.upload.length} files to ${folder}/, ${plan.unchanged.length} already there`);
+  await inBatches(plan.upload, concurrency, (file) => storage.upload(`${folder}/${file.path}`, file.bytes, { contentType: contentTypeFor(file.path) }));
 
   const env = await syncEnvironment({ scripts: api.scripts, scriptId, desired: environment });
   log(`environment synced: ${summarize(env)}`);
 
-  await api.scripts.uploadCode(scriptId, await readFile(serverEntry, "utf8"));
+  await api.scripts.uploadCode(scriptId, preamble({ id, site }) + bundle);
   await api.scripts.publish(scriptId, note ?? `bunny-edge-deploy ${new Date().toISOString()}`);
   const release = (await api.scripts.activeRelease(scriptId)).Uuid;
   log(`published release ${release}`);
 
-  if (purge === "targeted") {
-    for (const url of purgeUrls({ hostname, paths: plan.changedUnhashed })) await api.purgeUrl(url);
-    if (cacheTag) await api.pullZones.purgeTag(pullZone.Id, cacheTag);
-  } else await api.pullZones.purgeAll(pullZone.Id);
-
-  const state = await readState(storage);
-  const retention = reconcileRetention({ state, stale: plan.stale, keep: keepStaleDeploys });
-  for (const path of retention.remove) await storage.remove(path);
-  await storage.upload(STATE_PATH, Buffer.from(JSON.stringify(retention.state)), { contentType: "application/json" });
+  await api.pullZones.purgeAll(pullZone.Id);
+  await sleep(SETTLE_MS);
+  await api.pullZones.purgeAll(pullZone.Id);
 
   const staticPath = smokeStaticPath ?? (local.find((f) => isHashedAsset(f.path)) ?? local[0]).path;
   const smoke = await smokeTest({ hostname, staticPath, serverRoute, fetch, sleep, retryForMs: smokeRetryForMs });
   if (smoke.errors.length > 0) throw new Error(`smoke test failed:\n${smoke.errors.join("\n")}`);
 
-  return { uploaded: plan.upload.map((f) => f.path), unchanged: plan.unchanged, stale: plan.stale, removed: retention.remove, environment: env, release, smoke };
+  return { deployId: id, uploaded: plan.upload.map((f) => f.path), unchanged: plan.unchanged, environment: env, release, smoke };
 }
 
 async function readLocalFiles(clientDir) {
@@ -60,20 +56,15 @@ async function readLocalFiles(clientDir) {
 }
 
 // A storage zone rejects its own password for a few seconds after creation.
-async function listWhenReady(storage, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), attempts = 30) {
+async function listWhenReady(storage, directory, sleep, attempts = 30) {
   for (let attempt = 1; ; attempt += 1) {
     try {
-      return await storage.listAll();
+      return await storage.listAll(directory);
     } catch (error) {
       if (error.status !== 401 || attempt >= attempts) throw error;
       await sleep(2000);
     }
   }
-}
-
-async function readState(storage) {
-  const bytes = await storage.download(STATE_PATH);
-  return bytes ? JSON.parse(bytes.toString()) : undefined;
 }
 
 async function inBatches(items, size, work) {

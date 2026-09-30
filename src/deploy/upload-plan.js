@@ -35,16 +35,10 @@ export const isHashedAsset = (path) => HASHED.test(path);
 
 export const contentTypeFor = (path) => CONTENT_TYPES[path.slice(path.lastIndexOf(".") + 1).toLowerCase()];
 
-export function planUpload({ local, remote, statePath }) {
-  const remoteByPath = new Map(remote.map((file) => [file.path, file]));
-  const localPaths = new Set(local.map((file) => file.path));
-  const upload = local.filter((file) => remoteByPath.get(file.path)?.checksum !== file.checksum);
-  const hashed = upload.filter((file) => isHashedAsset(file.path));
-  const unhashed = upload.filter((file) => !isHashedAsset(file.path));
+export function planUpload({ local, remote }) {
+  const remoteChecksums = new Map(remote.map((file) => [file.path, file.checksum]));
   return {
-    upload: [...hashed, ...unhashed],
-    unchanged: local.filter((file) => remoteByPath.get(file.path)?.checksum === file.checksum).map((file) => file.path),
-    stale: remote.map((file) => file.path).filter((path) => !localPaths.has(path) && path !== statePath),
-    changedUnhashed: unhashed.map((file) => file.path),
+    upload: local.filter((file) => remoteChecksums.get(file.path) !== file.checksum),
+    unchanged: local.filter((file) => remoteChecksums.get(file.path) === file.checksum).map((file) => file.path),
   };
 }

@@ -13,11 +13,11 @@ async function entryFile(source) {
 }
 
 const ok = `import * as BunnySDK from "npm:@bunny.net/edgescript-sdk@0.12.1";
-BunnySDK.net.http.servePullZone().onOriginRequest(async (ctx) => ctx.request);
+BunnySDK.net.http.serve(async () => new Response("ok"));
 `;
 
 describe("analyzeServerEntry static checks", () => {
-  it("passes a self-contained middleware file", async () => {
+  it("passes a self-contained standalone script", async () => {
     const result = await analyzeServerEntry({ path: await entryFile(ok), sizeLimit: 8 * 1024 * 1024 });
     assert.deepEqual(result.errors, []);
     assert.deepEqual(result.warnings, []);
@@ -74,12 +74,6 @@ describe("analyzeServerEntry static checks", () => {
     assert.equal(errors.filter((e) => /CommonJS/.test(e)).length, 4);
   });
 
-  it("errors when no middleware registration is visible in the source", async () => {
-    const source = `import * as BunnySDK from "npm:@bunny.net/edgescript-sdk@0.12.1";\nBunnySDK.net.http.serve(() => new Response("hi"));\n`;
-    const { errors } = await analyzeServerEntry({ path: await entryFile(source), sizeLimit: 1e7 });
-    assert.match(errors[0], /servePullZone.*onOriginRequest/);
-  });
-
   it("errors above the size limit and warns above the cold start threshold", async () => {
     const big = ok + "// " + "x".repeat(3 * 1024 * 1024) + "\n";
     const over = await analyzeServerEntry({ path: await entryFile(big), sizeLimit: 2 * 1024 * 1024 });
@@ -93,29 +87,26 @@ describe("analyzeServerEntry static checks", () => {
 const denoAvailable = await hasDeno();
 
 describe("probeServerEntry runtime probe", () => {
-  it("reports import time and registered hooks from the Deno harness", { skip: !denoAvailable }, async () => {
-    const source = `globalThis.Bunny.v1.registerMiddlewares({ onOriginRequest: [async (ctx) => ctx.request], onOriginResponse: [] });`;
+  it("reports import time and the registered serve handler from the Deno harness", { skip: !denoAvailable }, async () => {
+    const source = `globalThis.Bunny.v1.serve(() => new Response("hi"));`;
     const result = await probeServerEntry({ path: await entryFile(source), startupLimitMs: 500 });
     assert.equal(result.skipped, false);
     assert.ok(result.importMs >= 0 && result.importMs < 500);
-    assert.deepEqual(result.registered, { onOriginRequest: 1, onOriginResponse: 0 });
+    assert.deepEqual(result.registered, { serve: 1 });
     assert.deepEqual(result.errors, []);
   });
 
-  it("counts handlers the SDK pushes after registering its arrays, and resolves npm: specifiers", { skip: !denoAvailable }, async () => {
-    const sdkLike = `const requests = []; globalThis.Bunny.v1.registerMiddlewares({ onOriginRequest: requests, onOriginResponse: [] }); requests.push(async (ctx) => ctx.request);`;
-    const result = await probeServerEntry({ path: await entryFile(sdkLike), startupLimitMs: 500 });
-    assert.deepEqual(result.registered, { onOriginRequest: 1, onOriginResponse: 0 });
+  it("resolves npm: specifiers, so the real SDK registers its handler", { skip: !denoAvailable }, async () => {
     const real = await probeServerEntry({ path: await entryFile(ok), startupLimitMs: 5000 });
     assert.deepEqual(real.errors, []);
-    assert.equal(real.registered.onOriginRequest, 1);
+    assert.equal(real.registered.serve, 1);
   });
 
-  it("errors when the file throws on import or registers no request hook", { skip: !denoAvailable }, async () => {
+  it("errors when the file throws on import or serves no requests, as a middleware script does", { skip: !denoAvailable }, async () => {
     const result = await probeServerEntry({ path: await entryFile(`throw new Error("boom")`), startupLimitMs: 500 });
     assert.match(result.errors[0], /boom/);
-    const none = await probeServerEntry({ path: await entryFile(`globalThis.Bunny.v1.serve(() => new Response(""))`), startupLimitMs: 500 });
-    assert.match(none.errors[0], /onOriginRequest/);
+    const middleware = await probeServerEntry({ path: await entryFile(`globalThis.Bunny.v1.registerMiddlewares({ onOriginRequest: [async (ctx) => ctx.request], onOriginResponse: [] });`), startupLimitMs: 500 });
+    assert.match(middleware.errors[0], /no request handler.*serve/);
   });
 
   it("is skipped with a notice when deno is not installed", async () => {

@@ -77,6 +77,12 @@ describe("storage list", () => {
     assert.equal(calls[1].url, "https://storage.bunnycdn.com/site/assets/");
   });
 
+  it("treats a 404 on a folder that does not exist yet as empty", async () => {
+    const { client, calls } = storage([{ status: 404 }]);
+    assert.deepEqual(await client.listAll("deploys/689f0795086f"), []);
+    assert.equal(calls[0].url, "https://storage.bunnycdn.com/site/deploys/689f0795086f/");
+  });
+
   it("treats a 404 on the root as an empty zone", async () => {
     const { client } = storage([{ status: 404, json: [{ HttpCode: 404, Message: "Not found" }] }]);
     assert.deepEqual(await client.listAll(), []);

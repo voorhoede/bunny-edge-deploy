@@ -1,18 +1,23 @@
 const TIERS = { standard: 0, edge: 1 };
 const PRICING_TIERS = { standard: 0, volume: 1 };
 const GEO_ZONES = { EU: "EnableGeoZoneEU", US: "EnableGeoZoneUS", ASIA: "EnableGeoZoneASIA", SA: "EnableGeoZoneSA", AF: "EnableGeoZoneAF" };
+const REQUIRED_SETTINGS = { disableCookies: "DisableCookies", enableSmartCache: "EnableSmartCache", enableCacheSlice: "EnableCacheSlice" };
 
 export function desiredStorageZone({ name, region = "DE", tier = "standard", replicationRegions = [] }) {
   return { Name: name, Region: region, ZoneTier: TIERS[tier], ReplicationRegions: replicationRegions };
 }
 
-export function desiredPullZoneSettings({ storageZoneId, scriptId, pricingTier = "standard", pricingRegions = ["EU"], staleWhileUpdating = false, monthlyBandwidthLimit = 0 }) {
+// The settings a build names in requires.pullZone, plus the override that would otherwise cache every response regardless of its headers.
+export function requiredPullZoneSettings(requirements = {}) {
+  const named = Object.entries(REQUIRED_SETTINGS).filter(([key]) => typeof requirements[key] === "boolean").map(([key, field]) => [field, requirements[key]]);
+  return { CacheControlMaxAgeOverride: -1, ...Object.fromEntries(named) };
+}
+
+export function desiredPullZoneSettings({ scriptId, requirements = {}, pricingTier = "standard", pricingRegions = ["EU"], staleWhileUpdating = false, monthlyBandwidthLimit = 0 }) {
   const geoZones = Object.fromEntries(Object.entries(GEO_ZONES).map(([region, key]) => [key, pricingRegions.includes(region)]));
   return {
-    OriginType: 2,
-    StorageZoneId: storageZoneId,
-    MiddlewareScriptId: scriptId,
-    EdgeScriptExecutionPhase: 0,
+    OriginType: 4,
+    EdgeScriptId: scriptId,
     Type: PRICING_TIERS[pricingTier],
     ...geoZones,
     EnableSmartCache: false,
@@ -39,5 +44,6 @@ export function desiredPullZoneSettings({ storageZoneId, scriptId, pricingTier =
     LoggingSaveToStorage: false,
     LoggingIPAnonymizationEnabled: true,
     MonthlyBandwidthLimit: monthlyBandwidthLimit,
+    ...requiredPullZoneSettings(requirements),
   };
 }

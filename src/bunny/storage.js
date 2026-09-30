@@ -34,7 +34,7 @@ export function createStorageClient({ hostname, zoneName, password, fetch = glob
     try {
       entries = await listDirectory(directory);
     } catch (error) {
-      if (directory === "" && error.status === 404) return [];
+      if (error.status === 404) return [];
       throw error;
     }
     const pathOf = (entry) => (directory ? `${directory}/${entry.ObjectName}` : entry.ObjectName);
