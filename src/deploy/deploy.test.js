@@ -56,7 +56,7 @@ function fakes({ remote = () => [], folders = [], edgeRules = [], downloads = {}
   };
   const sleep = async (ms) => events.push(["sleep", ms]);
   // Stands in for publishing a static site: the fake CDN then answers for that deploy.
-  const publish = async (args) => { events.push(["publish"]); publishes.push(args); served.deployId = args.deployId; return { confirmed: true }; };
+  const publish = async (args) => { events.push(["publish-site"]); publishes.push(args); served.deployId = args.deployId; return { confirmed: true }; };
   return { storage, api, fetch, sleep, publish, publishes, events, maxInFlight: () => maxInFlight };
 }
 
@@ -217,8 +217,8 @@ describe("deployStatic", () => {
     const { storage, api, fetch, sleep, publish, publishes, events } = fakes({ folders: [{ name: "000000000001", created: "2026-09-01T00:00:00" }, { name: deployId, created: "2026-09-30T00:00:00" }] });
     const result = await deployStatic({ api, storage, fetch, sleep, publish, manifest, ...staticCommon, keepDeploys: 1 });
     const order = events.map((e) => e[0]).filter((k, i, all) => k !== all[i - 1]);
-    assert.deepEqual(order, ["list", "upload", "publish", "smoke", "listFolders", "removeFolder"]);
-    assert.ok(!events.some((e) => ["uploadCode", "publish-script", "var", "secret"].includes(e[0])));
+    assert.deepEqual(order, ["list", "upload", "publish-site", "smoke", "listFolders", "removeFolder"]);
+    assert.ok(!events.some((e) => ["uploadCode", "publish", "publishRelease", "var", "secret"].includes(e[0])));
     assert.ok(events.filter((e) => e[0] === "upload").some((e) => e[1] === `deploys/${result.deployId}/_headers`));
     assert.equal(publishes[0].deployId, result.deployId);
     assert.ok(publishes[0].rules.some((rule) => rule.ActionParameter3 === `/deploys/${result.deployId}/`));
