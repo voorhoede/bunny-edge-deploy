@@ -1,6 +1,6 @@
 # Bunny.net findings (verified 2026-09-23 and 2026-09-30)
 
-Sources: official OpenAPI specs (`https://core-api-public-docs.b-cdn.net/docs/v3/public.json` and `compute.json`), docs at `bunny.net/docs` (docs.bunny.net redirects there), the `@bunny.net/edgescript-sdk` package, the Bunny CLI 0.16.1 binary, and live tests on throwaway resources (2026-09-23: storage zone 1931485, pull zone 6671152, script 92103; 2026-09-30: storage zone 1955250, pull zone 6715744, script 93293; all deleted afterwards).
+Sources: official OpenAPI specs (`https://core-api-public-docs.b-cdn.net/docs/v3/public.json` and `compute.json`), docs at `bunny.net/docs` (docs.bunny.net redirects there), the `@bunny.net/edgescript-sdk` package, the Bunny CLI 0.16.1 binary, and live tests on throwaway resources (2026-09-23: storage zone 1931485, pull zone 6671152, script 92103; 2026-09-30: storage zone 1955250, pull zone 6715744, script 93293; all deleted afterwards. A second 2026-09-30 run on another account: storage zone 1955340 and script 93304 deleted, pull zone 6715927 left disabled because the account was suspended).
 
 ## Live-tested behavior
 
@@ -15,6 +15,11 @@ Sources: official OpenAPI specs (`https://core-api-public-docs.b-cdn.net/docs/v3
 - A release id is an 8-character string (`sjSMbTEz`), not a UUID. `POST /compute/script/{id}/publish/{id}` makes an older release active again without creating a new one, and a `Note` sent with it is not stored.
 - Rollback restores code and files together when each release names its own storage folder: after deploying a changed build to `deploys/<new>/` and publishing the previous release by id, the site served the old page and the old hashed CSS.
 - `DELETE https://storage.bunnycdn.com/<zone>/deploys/<id>/` (trailing slash) deletes the folder and everything in it (200).
+
+### A suspended account (2026-09-30, trial account without a verified card)
+- `GET /user` reported `Suspended: true` in the middle of a test run, with no error from any API call before it.
+- The pull zone then reported `Enabled: false` and answered 403, and Storage rejected the zone's own passwords with 401 on every path, so a deploy looks like a storage zone that is not ready yet.
+- `DELETE /pullzone/{id}` returned 404 `pullZone.not_found` while `GET /pullzone/{id}` still returned the zone. Deleting the script and the storage zone still worked (204).
 
 ### SSR responses returned from `onOriginRequest`
 - A new pull zone has `CacheControlMaxAgeOverride = 2592000`. With that default every script response is cached 30 days regardless of its Cache-Control, including `private` and `no-store`, and one visitor's cookie-personalized page was served to another.
