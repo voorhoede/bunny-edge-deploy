@@ -45,8 +45,8 @@ function fakes({ remote = () => [], folders = [], edgeRules = [], downloads = {}
       publish: async (id, note) => events.push(["publish", note]),
       publishRelease: async (id, uuid) => events.push(["publishRelease", uuid]),
       activeRelease: async () => ({ Uuid: "sjSMbTEz" }),
-      variables: { list: async () => [], upsert: async (id, v) => { events.push(["var", v.name]); return "created"; } },
-      secrets: { list: async () => [], upsert: async (id, s) => { events.push(["secret", s.name]); return "created"; } },
+      variables: { list: async () => [], upsert: async (id, v) => { events.push(["var", v.name]); } },
+      secrets: { list: async () => [], upsert: async (id, s) => { events.push(["secret", s.name]); } },
     },
     pullZones: { get: async () => ({ EdgeRules: edgeRules }), purgeAll: async (id) => events.push(["purgeAll", id]) },
   };

@@ -72,9 +72,6 @@ export function createStorageClient({ hostname, zoneName, password, fetch = glob
         throw error;
       }
     },
-    remove: async (path) => {
-      await send("DELETE", path);
-    },
     removeFolder: async (path) => {
       await send("DELETE", `${path}/`);
     },

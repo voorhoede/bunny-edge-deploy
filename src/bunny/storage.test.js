@@ -113,20 +113,13 @@ describe("storage list", () => {
 describe("storage download", () => {
   it("returns the bytes, or undefined when the file does not exist", async () => {
     const { client, calls } = storage([{ status: 200, text: "{}" }, { status: 404 }]);
-    assert.equal((await client.download("state.json")).toString(), "{}");
+    assert.equal((await client.download("deploys/689f0795086f/_headers")).toString(), "{}");
     assert.equal(calls[0].method, "GET");
     assert.equal(await client.download("missing.json"), undefined);
   });
 });
 
 describe("storage remove", () => {
-  it("DELETEs the file path", async () => {
-    const { client, calls } = storage([{ status: 200 }]);
-    await client.remove("assets/old.js");
-    assert.equal(calls[0].method, "DELETE");
-    assert.equal(calls[0].url, "https://storage.bunnycdn.com/site/assets/old.js");
-  });
-
   it("DELETEs a folder and everything in it through its path with a trailing slash", async () => {
     const { client, calls } = storage([{ status: 200 }]);
     await client.removeFolder("deploys/aaaaaaaaaaaa");

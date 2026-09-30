@@ -59,22 +59,22 @@ describe("createBunnyApi request basics", () => {
     const { client, calls, sleeps } = api([
       { status: 429, text: "slow down" },
       new TypeError("fetch failed"),
-      { status: 200, json: [] },
+      { status: 200, json: { Id: 3 } },
     ]);
-    assert.deepEqual(await client.pullZones.list(), []);
+    assert.deepEqual(await client.pullZones.get(3), { Id: 3 });
     assert.equal(calls.length, 3);
     assert.deepEqual(sleeps, [500, 1000]);
   });
 
   it("retries a 5xx response too", async () => {
-    const { client, calls } = api([{ status: 502, text: "bad gateway" }, { status: 200, json: [] }]);
-    assert.deepEqual(await client.pullZones.list(), []);
+    const { client, calls } = api([{ status: 502, text: "bad gateway" }, { status: 200, json: { Id: 3 } }]);
+    assert.deepEqual(await client.pullZones.get(3), { Id: 3 });
     assert.equal(calls.length, 2);
   });
 
   it("gives up after the configured attempts and throws the last error", async () => {
     const { client, calls } = api([{ status: 503 }, { status: 503 }, { status: 503 }]);
-    await assert.rejects(client.pullZones.list(), (error) => error instanceof BunnyApiError && error.status === 503);
+    await assert.rejects(client.pullZones.get(3), (error) => error instanceof BunnyApiError && error.status === 503);
     assert.equal(calls.length, 3);
   });
 });
@@ -123,15 +123,13 @@ describe("scripts", () => {
     assert.equal(calls[1].url, "https://api.bunny.net/compute/script/5/publish/ge45sc2J");
   });
 
-  it("upserts variables and secrets and reports created versus updated", async () => {
-    const { client, calls } = api([{ status: 200, json: { Id: 1 } }, { status: 204 }, { status: 200, json: { Id: 2 } }, { status: 204 }]);
-    assert.equal(await client.scripts.variables.upsert(5, { name: "A", value: "1" }), "created");
-    assert.equal(await client.scripts.variables.upsert(5, { name: "A", value: "2" }), "updated");
-    assert.equal(await client.scripts.secrets.upsert(5, { name: "S", value: "x" }), "created");
-    assert.equal(await client.scripts.secrets.upsert(5, { name: "S", value: "y" }), "updated");
+  it("upserts variables and secrets", async () => {
+    const { client, calls } = api([{ status: 200, json: { Id: 1 } }, { status: 200, json: { Id: 2 } }]);
+    await client.scripts.variables.upsert(5, { name: "A", value: "1" });
+    await client.scripts.secrets.upsert(5, { name: "S", value: "x" });
     assert.equal(calls[0].method, "PUT");
     assert.deepEqual(JSON.parse(calls[0].body), { Name: "A", DefaultValue: "1", Required: false });
-    assert.deepEqual(JSON.parse(calls[2].body), { Name: "S", Secret: "x" });
+    assert.deepEqual(JSON.parse(calls[1].body), { Name: "S", Secret: "x" });
   });
 
   it("lists variables from the script and secrets from the secrets endpoint", async () => {
@@ -145,22 +143,11 @@ describe("scripts", () => {
 });
 
 describe("pull zones and purge", () => {
-  it("purges a url through the purge endpoint with the url as a query parameter", async () => {
-    const { client, calls } = api([{ status: 200 }]);
-    await client.purgeUrl("https://site.b-cdn.net/assets/*");
-    const url = new URL(calls[0].url);
-    assert.equal(url.pathname, "/purge");
-    assert.equal(url.searchParams.get("url"), "https://site.b-cdn.net/assets/*");
-    assert.equal(calls[0].method, "POST");
-  });
-
-  it("purges the whole zone or a cache tag through purgeCache", async () => {
-    const { client, calls } = api([{ status: 204 }, { status: 204 }]);
+  it("purges the whole zone through purgeCache", async () => {
+    const { client, calls } = api([{ status: 204 }]);
     await client.pullZones.purgeAll(3);
-    await client.pullZones.purgeTag(3, "ssr");
     assert.equal(calls[0].url, "https://api.bunny.net/pullzone/3/purgeCache");
     assert.deepEqual(JSON.parse(calls[0].body), {});
-    assert.deepEqual(JSON.parse(calls[1].body), { CacheTag: "ssr" });
   });
 
   it("deletes an edge rule by its Guid", async () => {

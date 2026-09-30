@@ -57,7 +57,6 @@ export function createBunnyApi({ apiKey, fetch = globalThis.fetch, sleep } = {})
 
   return {
     pullZones: {
-      list: () => get("/pullzone").then(toItems),
       findByName: findByName("/pullzone"),
       get: (id) => get(`/pullzone/${id}`),
       create: create("/pullzone"),
@@ -66,7 +65,6 @@ export function createBunnyApi({ apiKey, fetch = globalThis.fetch, sleep } = {})
       addOrUpdateEdgeRule: (id, rule) => post(`/pullzone/${id}/edgerules/addOrUpdate`, rule),
       deleteEdgeRule: (id, guid) => del(`/pullzone/${id}/edgerules/${guid}`),
       purgeAll: (id) => post(`/pullzone/${id}/purgeCache`, {}),
-      purgeTag: (id, tag) => post(`/pullzone/${id}/purgeCache`, { CacheTag: tag }),
     },
     storageZones: {
       findByName: findByName("/storagezone"),
@@ -76,29 +74,22 @@ export function createBunnyApi({ apiKey, fetch = globalThis.fetch, sleep } = {})
     },
     scripts: {
       findByName: findByName("/compute/script"),
-      get: (id) => get(`/compute/script/${id}`),
       create: create("/compute/script"),
       uploadCode: (id, code) => post(`/compute/script/${id}/code`, { Code: code }),
       publish: (id, note) => post(`/compute/script/${id}/publish`, { Note: note }),
       publishRelease: (id, uuid, note) => post(`/compute/script/${id}/publish/${uuid}`, { Note: note }),
-      listReleases: (id) => get(`/compute/script/${id}/releases`).then(toItems),
       activeRelease: (id) => get(`/compute/script/${id}/releases/active`),
       variables: {
         list: async (id) => (await get(`/compute/script/${id}`)).EdgeScriptVariables.map((v) => ({ id: v.Id, name: v.Name, value: v.DefaultValue })),
-        upsert: (id, { name, value }) => put(`/compute/script/${id}/variables`, { Name: name, DefaultValue: value, Required: false }).then(upsertResult),
-        delete: (id, variableId) => del(`/compute/script/${id}/variables/${variableId}`),
+        upsert: (id, { name, value }) => put(`/compute/script/${id}/variables`, { Name: name, DefaultValue: value, Required: false }),
       },
       secrets: {
         list: async (id) => (await get(`/compute/script/${id}/secrets`)).Secrets.map((s) => ({ id: s.Id, name: s.Name })),
-        upsert: (id, { name, value }) => put(`/compute/script/${id}/secrets`, { Name: name, Secret: value }).then(upsertResult),
-        delete: (id, secretId) => del(`/compute/script/${id}/secrets/${secretId}`),
+        upsert: (id, { name, value }) => put(`/compute/script/${id}/secrets`, { Name: name, Secret: value }),
       },
     },
-    purgeUrl: (url) => post(`/purge?${new URLSearchParams({ url })}`),
   };
 }
-
-const upsertResult = ({ status }) => (status === 204 ? "updated" : "created");
 
 const toItems = (payload) => (Array.isArray(payload) ? payload : payload?.Items ?? []);
 

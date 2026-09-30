@@ -5,8 +5,8 @@ import { syncEnvironment } from "./env-sync.js";
 function fakeScripts(remote) {
   const calls = [];
   const scripts = {
-    variables: { list: async () => remote.variables, upsert: async (id, v) => { calls.push(["var", v.name]); return "updated"; }, delete: async (id, vid) => calls.push(["delvar", vid]) },
-    secrets: { list: async () => remote.secrets, upsert: async (id, s) => { calls.push(["secret", s.name]); return "created"; }, delete: async (id, sid) => calls.push(["delsecret", sid]) },
+    variables: { list: async () => remote.variables, upsert: async (id, v) => { calls.push(["var", v.name]); } },
+    secrets: { list: async () => remote.secrets, upsert: async (id, s) => { calls.push(["secret", s.name]); } },
   };
   return { scripts, calls };
 }
