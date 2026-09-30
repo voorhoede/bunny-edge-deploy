@@ -150,13 +150,16 @@ async function readLocalFiles(clientDir) {
   }));
 }
 
-// A storage zone rejects its own password for a few seconds after creation.
+// A storage zone rejects its own password for a few seconds after creation, and for good on a suspended account.
 async function listWhenReady(storage, directory, sleep, attempts = 30) {
   for (let attempt = 1; ; attempt += 1) {
     try {
       return await storage.listAll(directory);
     } catch (error) {
-      if (error.status !== 401 || attempt >= attempts) throw error;
+      if (error.status !== 401) throw error;
+      if (attempt >= attempts) {
+        throw Object.assign(new Error(`${error.message}: storage kept refusing the zone's password for ${(attempts * 2000) / 1000} s. A new zone accepts it sooner, so the Bunny account may be suspended; check the dashboard`), { status: 401 });
+      }
       await sleep(2000);
     }
   }

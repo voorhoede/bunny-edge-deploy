@@ -183,6 +183,13 @@ describe("deploy", () => {
     assert.ok(events.some((e) => e[0] === "upload"));
   });
 
+  it("names a suspended account as a possible cause when storage keeps refusing the zone's password", async () => {
+    const manifest = await build(files);
+    const { storage, api, fetch } = fakes();
+    storage.listAll = async () => { throw Object.assign(new Error("Bunny Storage 401 on GET deploys/x/"), { status: 401 }); };
+    await assert.rejects(deploy({ api, storage, fetch, sleep: async () => {}, manifest, environment: { variables: [], secrets: [] }, ...common }), /401[\s\S]*suspended/);
+  });
+
   it("fails the deploy when the smoke test fails", async () => {
     const manifest = await build(files);
     const { storage, api, sleep } = fakes();
