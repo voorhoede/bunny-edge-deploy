@@ -13,10 +13,10 @@ inputs:
     description: Bunny.net account API key. Pass it as a secret.
     required: true
   env:
-    description: Runtime environment variables to set on the edge script, one KEY=value per line. Only listed keys are set or updated; nothing is removed. Variables can also be managed in the Bunny dashboard. Names the action sets from the zones, such as `BUNNY_STORAGE_KEY`, are not allowed, and a static build takes none.
+    description: Runtime environment variables to set on the edge script, one KEY=value per line. Everything after the first = is the value, taken literally, so quotes stay part of it. Only listed keys are set or updated; nothing is removed. Variables can also be managed in the Bunny dashboard. Names the action sets from the zones, such as `BUNNY_STORAGE_KEY`, are not allowed, and a static build takes none.
     default: ""
   secrets:
-    description: Encrypted secrets to set on the edge script, one KEY=value per line. Only listed keys are set; nothing is removed. Values are masked in logs and never read back.
+    description: Encrypted secrets to set on the edge script, one KEY=value per line, with the value taken literally like env. Only listed keys are set; nothing is removed. Values are masked in logs and never read back.
     default: ""
   name:
     description: Base name for the storage zone, pull zone and script. Defaults to the repository name, lowercased, with anything outside a-z, 0-9 and dashes replaced by a dash. The pull zone name becomes the `<name>.b-cdn.net` hostname and must be unique across Bunny.

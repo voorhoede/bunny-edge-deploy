@@ -154,7 +154,7 @@ async function checkCompatibility({ options, environment, actions, probeServerEn
   for (const name of ["script-size-limit-mb", "startup-limit-ms", "monthly-bandwidth-limit-gb"]) {
     if (options[name] < 0) errors.push(`${name} is ${options[name]}, but it cannot be negative`);
   }
-  const warnings = [];
+  const warnings = [...environment.warnings];
   if (read.errors.length === 0 && read.manifest.kind === "static") {
     const { manifest } = read;
     if (environment.variables.length + environment.secrets.length > 0) errors.push("a static build has no script, so env and secrets have nowhere to go; remove them from the workflow");

@@ -175,6 +175,13 @@ describe("run", () => {
     for (const name of ["concurrency", "script-size-limit-mb", "startup-limit-ms", "monthly-bandwidth-limit-gb"]) assert.ok(lines.some((l) => l.startsWith("error:") && l.includes(name)), name);
   });
 
+  it("warns about a workflow value wrapped in quotes, which become part of the value", async () => {
+    const path = await project();
+    const { actions, deps, lines } = harness();
+    await run({ inputs: { "build-manifest": path, "bunny-api-key": "key", env: 'A="1"' }, actions, ...deps });
+    assert.ok(lines.some((l) => /warning:.*env A.*quotes/.test(l)));
+  });
+
   it("derives the resource name from the repository when no name is given", async () => {
     const path = await project();
     const { actions, deps, calls } = harness();
