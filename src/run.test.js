@@ -59,7 +59,7 @@ function harness() {
       calls.push(["deployStatic", { manifest: args.manifest, storageZone: args.storageZone, keepDeploys: args.keepDeploys }]);
       return { deployId: "5e11111e1824", uploaded: ["index.html"], unchanged: [], pruned: [], confirmed: true, smoke: { checks: [], errors: [], warnings: [] } };
     },
-    probeServerEntry: async () => ({ skipped: true, notice: "deno missing", errors: [] }),
+    probeScript: async () => ({ skipped: true, notice: "deno missing", errors: [] }),
     createBunnyApi: () => ({}),
     createStorageClient: () => ({}),
   };

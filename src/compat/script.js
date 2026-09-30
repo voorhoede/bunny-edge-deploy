@@ -12,7 +12,7 @@ const UNSUPPORTED_NODE_MODULES = new Set(["child_process", "cluster", "constants
 
 const megabytes = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
-export async function analyzeServerEntry({ path, sizeLimit, coldStartWarnSize = 2 * 1024 * 1024 }) {
+export async function analyzeScript({ path, sizeLimit, coldStartWarnSize = 2 * 1024 * 1024 }) {
   const errors = [];
   const warnings = [];
   let info;
@@ -41,7 +41,7 @@ export async function analyzeServerEntry({ path, sizeLimit, coldStartWarnSize = 
   return { errors, warnings, size };
 }
 
-export async function probeServerEntry({ path, startupLimitMs, deno = "deno", timeoutMs = 120_000 }) {
+export async function probeScript({ path, startupLimitMs, deno = "deno", timeoutMs = 120_000 }) {
   const harness = fileURLToPath(new URL("./deno-harness.js", import.meta.url));
   const importOnce = () => run(deno, ["run", "--quiet", "--allow-all", "--node-modules-dir=none", "--no-lock", harness, path], { maxBuffer: 16 * 1024 * 1024, env: { ...process.env, NO_COLOR: "1" }, timeout: timeoutMs });
   let stdout;

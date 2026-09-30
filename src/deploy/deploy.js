@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { analyzeClientDir } from "../compat/client-dir.js";
+import { analyzeAssetsDir } from "../compat/assets-dir.js";
 import { checkRuleBudget, publishStaticSite } from "../static-site/publish.js";
 import { parseHeaders, parseRedirects } from "../static-site/parse.js";
 import { notFoundSettings, servedDeploy, siteRules } from "../static-site/rules.js";
@@ -141,11 +141,11 @@ async function pruneFolders({ storage, id, keepDeploys, log }) {
   return pruned;
 }
 
-async function readLocalFiles(clientDir) {
-  const { files, errors } = await analyzeClientDir({ path: clientDir });
+async function readLocalFiles(assetsDir) {
+  const { files, errors } = await analyzeAssetsDir({ path: assetsDir });
   if (errors.length > 0) throw new Error(errors.join("\n"));
   return Promise.all(files.map(async ({ path }) => {
-    const bytes = await readFile(join(clientDir, path));
+    const bytes = await readFile(join(assetsDir, path));
     return { path, bytes, checksum: createHash("sha256").update(bytes).digest("hex").toUpperCase() };
   }));
 }

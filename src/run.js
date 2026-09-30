@@ -2,9 +2,9 @@ import { resolve } from "node:path";
 import { createBunnyApi as defaultCreateBunnyApi } from "./bunny/api.js";
 import { createStorageClient as defaultCreateStorageClient } from "./bunny/storage.js";
 import { readBuildManifest } from "./build-manifest/build-manifest.js";
-import { analyzeClientDir } from "./compat/client-dir.js";
+import { analyzeAssetsDir } from "./compat/assets-dir.js";
 import { parseEnvironment } from "./compat/environment.js";
-import { analyzeServerEntry, probeServerEntry as defaultProbeServerEntry } from "./compat/server-entry.js";
+import { analyzeScript, probeScript as defaultProbeScript } from "./compat/script.js";
 import { deploy as defaultDeploy, deployStatic as defaultDeployStatic } from "./deploy/deploy.js";
 import { PLATFORM_NAMES, platformEnvironment } from "./deploy/platform-env.js";
 import { provision as defaultProvision, provisionStatic as defaultProvisionStatic } from "./provision/provision.js";
@@ -38,7 +38,7 @@ export const INPUT_SCHEMA = {
 
 export async function run({
   inputs, actions, env = process.env,
-  provision = defaultProvision, deploy = defaultDeploy, probeServerEntry = defaultProbeServerEntry,
+  provision = defaultProvision, deploy = defaultDeploy, probeScript = defaultProbeScript,
   provisionStatic = defaultProvisionStatic, deployStatic = defaultDeployStatic,
   createBunnyApi = defaultCreateBunnyApi, createStorageClient = defaultCreateStorageClient,
 }) {
@@ -47,7 +47,7 @@ export async function run({
   const environment = parseEnvironment({ env: options.env, secrets: options.secrets });
   for (const secret of environment.secrets) actions.mask(secret.value);
 
-  const compat = await actions.group("Compatibility check", () => checkCompatibility({ options, environment, actions, probeServerEntry }));
+  const compat = await actions.group("Compatibility check", () => checkCompatibility({ options, environment, actions, probeScript }));
   if (compat.errors.length > 0) throw new Error(`compatibility check failed with ${compat.errors.length} problem(s)`);
   const { manifest } = compat;
 
@@ -146,7 +146,7 @@ function storageClient({ provisioned, actions, createStorageClient }) {
   return createStorageClient({ hostname: provisioned.storageZone.StorageHostname, zoneName: provisioned.storageZone.Name, password: provisioned.storageZone.Password });
 }
 
-async function checkCompatibility({ options, environment, actions, probeServerEntry }) {
+async function checkCompatibility({ options, environment, actions, probeScript }) {
   const read = await readBuildManifest(resolve(options["build-manifest"]));
   const errors = [...read.errors, ...environment.errors];
   if (options["keep-deploys"] < 1) errors.push(`keep-deploys is ${options["keep-deploys"]}, but it must be at least 1 so the live deploy keeps its files`);
@@ -158,7 +158,7 @@ async function checkCompatibility({ options, environment, actions, probeServerEn
   if (read.errors.length === 0 && read.manifest.kind === "static") {
     const { manifest } = read;
     if (environment.variables.length + environment.secrets.length > 0) errors.push("a static build has no script, so env and secrets have nowhere to go; remove them from the workflow");
-    const client = await analyzeClientDir({ path: manifest.assets.dir });
+    const client = await analyzeAssetsDir({ path: manifest.assets.dir });
     const site = analyzeSiteConfig(await readSiteConfig(manifest.assets.dir));
     errors.push(...client.errors, ...site.errors);
     warnings.push(...client.warnings, ...site.warnings);
@@ -166,9 +166,9 @@ async function checkCompatibility({ options, environment, actions, probeServerEn
   } else if (read.errors.length === 0) {
     const { manifest } = read;
     errors.push(...[...environment.variables, ...environment.secrets].filter((e) => PLATFORM_NAMES.has(e.name)).map((e) => `"${e.name}" is set by the action from the storage and pull zone; remove it from env and secrets`));
-    const script = await analyzeServerEntry({ path: manifest.script.entry, sizeLimit: options["script-size-limit-mb"] * 1024 * 1024 });
-    const probe = script.errors.length === 0 ? await probeServerEntry({ path: manifest.script.entry, startupLimitMs: options["startup-limit-ms"] }) : { skipped: true, errors: [] };
-    const client = await analyzeClientDir({ path: manifest.assets.dir });
+    const script = await analyzeScript({ path: manifest.script.entry, sizeLimit: options["script-size-limit-mb"] * 1024 * 1024 });
+    const probe = script.errors.length === 0 ? await probeScript({ path: manifest.script.entry, startupLimitMs: options["startup-limit-ms"] }) : { skipped: true, errors: [] };
+    const client = await analyzeAssetsDir({ path: manifest.assets.dir });
     errors.push(...script.errors, ...probe.errors, ...client.errors);
     warnings.push(...script.warnings, ...client.warnings);
     if (probe.skipped && probe.notice) actions.warning(probe.notice);
