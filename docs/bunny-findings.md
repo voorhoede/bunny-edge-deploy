@@ -33,6 +33,7 @@ Sources: official OpenAPI specs (`https://core-api-public-docs.b-cdn.net/docs/v3
 - An `OriginStorage` rule on `pattern:^https?://[^/]+/deploys/.*$` with MatchNone, plus a `BlockRequest` rule on the same pattern with MatchAny, serves `/` and `/docs/deploys/x/` from the deploy folder with 200 and answers 403 on `/deploys/` and `/deploys/<id>/index.html`.
 - In a `pattern:` trigger, `%-` and `%.` match a literal `-` and `.`: `.../my%-page/?$` matched `/my-page/` and not `/mypage/`, and `.../file%.v2%.txt$` matched `/file.v2.txt` and not `/fileXv2Xtxt`.
 - A script that was never published answers `GET /compute/script/{id}/releases/active` with 404 and an empty body, and `GET .../releases` with an empty `Items` list (script 93344, deleted).
+- `GET /pullzone/{id}` returns each edge rule with every field `addOrUpdate` was sent, unchanged (including an empty `ExtraActions`), plus `Guid`, `OrderIndex`, `ReadOnly`, a `Parameter1: ""` on each trigger and `null` for unsent action parameters (storage zone 1955945, pull zone 6717190, deleted).
 
 ### Loading an npm package at runtime instead of bundling it (2026-09-30, Shiki 4.4.3 behind `@bunny.net/astro-adapter`)
 - A script that keeps `import ... from "npm:shiki@4.4.3"` (plus `/langs`, `/engine/oniguruma` and a dynamic `import("npm:shiki@4.4.3/wasm")`) instead of bundling Shiki boots and highlights code on Bunny. Grammars that the package loads with dynamic imports were fetched on first use at request time (js, python, rust, go, ruby, sql all rendered). The script stayed at 2.95 MB, where bundling Shiki made it 12.85 MB.
@@ -86,6 +87,7 @@ Sources: official OpenAPI specs (`https://core-api-public-docs.b-cdn.net/docs/v3
 - API accepts values up to 4096 bytes and more than 128 variables, but the script then fails to boot and every request, including static files, returns 400 with an empty body.
 - Effective boot limits: value ≤ 2048 bytes (2049 breaks), ≤ 128 variables (129 breaks). Secrets do not count toward the 128 (128 variables + 2 secrets boots).
 - Changing a variable or secret takes effect without a republish, within ~10 s, on new isolates only. A running isolate kept the old value.
+- A running isolate still answered with the old variable value 45 s after the change (44 of 44 requests), and publishing the same code again brought a new isolate with the new value within 2 s (script 93348, pull zone 6717211, deleted, 2026-09-30). A publish is what brings changed values to traffic.
 - Rollback via `POST /compute/script/{id}/publish/{uuid}` works and does not touch variables: values are script-level, not per release.
 - Secrets cannot be read back (`GET /secrets` returns name and LastModified only). Variables can be read back.
 - Endpoints: `PUT /compute/script/{id}/variables` upsert `{Name, DefaultValue, Required}` (200 created, 204 updated); `PUT /compute/script/{id}/secrets` upsert `{Name, Secret}`; `DELETE .../variables/{id}`, `DELETE .../secrets/{id}`. Names must be unique across both.
