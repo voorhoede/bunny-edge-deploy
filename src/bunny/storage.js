@@ -38,6 +38,7 @@ export function createStorageClient({ hostname, zoneName, password, fetch = glob
     }
   }
 
+  // Only the folder asked for may not exist yet; a missing subfolder that was just listed is an error.
   async function listAll(directory = "") {
     let entries;
     try {
@@ -46,9 +47,13 @@ export function createStorageClient({ hostname, zoneName, password, fetch = glob
       if (error.status === 404) return [];
       throw error;
     }
+    return filesIn(directory, entries);
+  }
+
+  async function filesIn(directory, entries) {
     const pathOf = (entry) => (directory ? `${directory}/${entry.ObjectName}` : entry.ObjectName);
     const files = entries.filter((e) => !e.IsDirectory).map((e) => ({ path: pathOf(e), size: e.Length, checksum: e.Checksum }));
-    for (const entry of entries.filter((e) => e.IsDirectory)) files.push(...(await listAll(pathOf(entry))));
+    for (const entry of entries.filter((e) => e.IsDirectory)) files.push(...(await filesIn(pathOf(entry), await listDirectory(pathOf(entry)))));
     return files;
   }
 

@@ -96,6 +96,14 @@ describe("storage list", () => {
     assert.deepEqual(await empty.listFolders("deploys"), []);
   });
 
+  it("fails when a folder it found in the listing answers 404, instead of leaving that folder's files out", async () => {
+    const { client } = storage([
+      { json: [{ ObjectName: "assets", IsDirectory: true, Length: 0, Checksum: null, Path: "/site/deploys/689f0795086f/" }] },
+      { status: 404 },
+    ]);
+    await assert.rejects(client.listAll("deploys/689f0795086f"), (error) => error.status === 404 && /deploys\/689f0795086f\/assets/.test(error.message));
+  });
+
   it("treats a 404 on the root as an empty zone", async () => {
     const { client } = storage([{ status: 404, json: [{ HttpCode: 404, Message: "Not found" }] }]);
     assert.deepEqual(await client.listAll(), []);
