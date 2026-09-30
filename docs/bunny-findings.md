@@ -27,6 +27,12 @@ Sources: official OpenAPI specs (`https://core-api-public-docs.b-cdn.net/docs/v3
 - `addOrUpdate` with an existing rule's `Guid` updates it in place, and `DELETE /pullzone/{id}/edgerules/{Guid}` removes a rule (a removed redirect answered 404 right after the next publish).
 - `SetResponseHeader` rules on `pattern:^https?://[^/]+/about/?$` style triggers gave each page its own CSP from `_headers`, alongside a rule on `*` with the headers every page shares.
 
+### Active release and anchored triggers (2026-09-30, script 93341, storage zones 1955887, 1955890, 1955891, pull zones 6717078, 6717081, 6717084, deleted)
+- `GET /compute/script/{id}/releases/active` returns the release's `Note` as sent with `POST /compute/script/{id}/publish`, its full `Code`, `Uuid` and `Status` 1; `CommitSha` is null. After republishing an older release by id, it returns that release with its original `Note` and code.
+- `addOrUpdate` refuses a `pattern:` trigger that does not end in `$` with 400 `edgerule.invalid` "The trigger path is not a valid URL." (`pattern:^https?://[^/]+/deploys/` and `.../deploys/.*` both), for MatchAny and MatchNone alike. Ending it in `$` is accepted, which says nothing about how the rest of the pattern is read.
+- An `OriginStorage` rule on `pattern:^https?://[^/]+/deploys/.*$` with MatchNone, plus a `BlockRequest` rule on the same pattern with MatchAny, serves `/` and `/docs/deploys/x/` from the deploy folder with 200 and answers 403 on `/deploys/` and `/deploys/<id>/index.html`.
+- In a `pattern:` trigger, `%-` and `%.` match a literal `-` and `.`: `.../my%-page/?$` matched `/my-page/` and not `/mypage/`, and `.../file%.v2%.txt$` matched `/file.v2.txt` and not `/fileXv2Xtxt`.
+
 ### Loading an npm package at runtime instead of bundling it (2026-09-30, Shiki 4.4.3 behind `@bunny.net/astro-adapter`)
 - A script that keeps `import ... from "npm:shiki@4.4.3"` (plus `/langs`, `/engine/oniguruma` and a dynamic `import("npm:shiki@4.4.3/wasm")`) instead of bundling Shiki boots and highlights code on Bunny. Grammars that the package loads with dynamic imports were fetched on first use at request time (js, python, rust, go, ruby, sql all rendered). The script stayed at 2.95 MB, where bundling Shiki made it 12.85 MB.
 - The import runs when an isolate starts, so every route pays for it on a cold start: 15 requests to a cheap on-demand route took median 0.44 s and max 0.99 s, against median 0.27 s and max 0.30 s for the same site with Shiki left out.
