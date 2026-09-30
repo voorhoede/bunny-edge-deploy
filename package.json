@@ -2,7 +2,7 @@
   "name": "bunny-edge-deploy",
   "version": "0.0.0",
   "private": true,
-  "description": "GitHub Action that deploys a static client dir to Bunny Storage and a server entry to Bunny Edge Scripting middleware on a Bunny CDN pull zone",
+  "description": "GitHub Action that deploys the build a Bunny framework adapter describes in .bunny/build.json to Bunny Storage, Edge Scripting and a CDN pull zone",
   "type": "module",
   "engines": {
     "node": ">=24"

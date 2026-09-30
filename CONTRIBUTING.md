@@ -11,7 +11,7 @@
 - **Tests first.** Write the test, agree on the expected result, then implement. A bug fix gets a regression test that fails before the fix.
 - **Verify against Bunny, not memory.** Every API field, enum, limit and behavior in this code was checked against the official OpenAPI spec or on a live account. The facts are in `docs/bunny-findings.md`. Read it before touching anything that talks to Bunny, and add what you verify.
 - **Live tests use throwaway resources.** Prefix them with `bed-test-`, log every created ID, and delete them at the end of the run, also when it fails. Never point a test at a real site.
-- **Nothing destructive in the action.** It creates and updates, it never deletes or recreates a zone or script. Keep it that way.
+- **Nothing destructive in the action.** It never deletes or recreates a zone or script. The only things it deletes are its own: deploy folders past `keep-deploys` and edge rules with its `bunny-edge-deploy:` prefix. Keep it that way.
 - **Zero dependencies.** The action runs from source on the runner. Prefer Node built-ins and `fetch`; a package needs a reason in the pull request.
 - **Code and docs in US English.** Comments only for a constraint the code cannot show.
 

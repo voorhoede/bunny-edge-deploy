@@ -17,9 +17,9 @@ This project uses bunny.net. Manage its resources with the `bunny` CLI: database
 
 ## This repository
 
-`bunny-edge-deploy` is a GitHub Action (Node 24, zero dependencies, ESM) that deploys a built website to Bunny.net: `client-dir` to a storage zone, `server-entry` as a middleware edge script on a pull zone. It only deploys; building is the caller's job.
+`bunny-edge-deploy` is a GitHub Action (Node 24, zero dependencies, ESM) that deploys what a Bunny framework adapter describes in `.bunny/build.json`: client files to a per-deploy folder in a storage zone, and either a standalone Edge Script as the pull zone origin (server build) or edge rules that serve the folder (static build). It only deploys; building is the caller's job.
 
-- Layout by domain: `src/bunny/` API and storage clients, `src/compat/` the pre-deploy checks, `src/provision/` find-or-create and settings drift, `src/deploy/` upload, env sync, publish, purge, retention and smoke test, `src/github/` the Actions glue, `src/run.js` the orchestration, `src/main.js` the entry point.
+- Layout by domain: `src/build-manifest/` reading `.bunny/build.json`, `src/bunny/` API and storage clients, `src/compat/` the pre-deploy checks, `src/provision/` find-or-create and the settings the build needs, `src/deploy/` deploy folders, upload, variables, publish, smoke test and pruning, `src/static-site/` the edge rules a static build is served by, `src/github/` the Actions glue, `src/run.js` the orchestration, `src/main.js` the entry point.
 - Tests live next to the code as `*.test.js` and run with `npm test` (`node --test`). Deno on the PATH enables the startup probe tests; without it they are skipped.
 - Write the test before the implementation, and let a person confirm the expectation first.
 - Every Bunny API field, enum, limit and behavior used here was verified against the official OpenAPI spec or on a live account. The verified facts are in `docs/bunny-findings.md`; read it before changing anything that talks to Bunny, and add to it when you verify something new.
