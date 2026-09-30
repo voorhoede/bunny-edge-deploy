@@ -40,11 +40,18 @@ const setHeaders = ([first, ...rest]) => ({
   ExtraActions: rest.map(([name, value]) => ({ ActionType: ACTION.setResponseHeader, ActionParameter1: name, ActionParameter2: value })),
 });
 
+const SERVE = "serve the published deploy";
+
+export function servedDeploy(edgeRules = []) {
+  const serve = edgeRules.find((rule) => rule.Description === `${RULE_PREFIX}${SERVE}`);
+  return serve?.ActionParameter3?.match(/^\/deploys\/([^/]+)\/$/)?.[1];
+}
+
 export function siteRules({ storageZone, deployId, files = [], headers = [], redirects = [] }) {
   const blocks = headers.filter(({ path }) => isMatchable(path));
   const cacheRules = browserCacheRules(blocks);
   return [
-    rule("serve the published deploy", {
+    rule(SERVE, {
       ActionType: ACTION.originStorage,
       ActionParameter1: String(storageZone.Id),
       ActionParameter2: storageZone.Name,

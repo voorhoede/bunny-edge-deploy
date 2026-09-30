@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { analyzeClientDir } from "../compat/client-dir.js";
-import { assertRuleBudget, publishStaticSite } from "../static-site/publish.js";
+import { checkRuleBudget, publishStaticSite } from "../static-site/publish.js";
 import { parseHeaders, parseRedirects } from "../static-site/parse.js";
-import { notFoundSettings, siteRules } from "../static-site/rules.js";
+import { notFoundSettings, servedDeploy, siteRules } from "../static-site/rules.js";
 import { deployFolder, deployId, foldersToPrune, preamble } from "./deploy-folder.js";
 import { syncEnvironment } from "./env-sync.js";
 import { smokeTest } from "./smoke.js";
@@ -29,18 +29,19 @@ export async function deploy({
   const env = await syncEnvironment({ scripts: api.scripts, scriptId, desired: environment });
   log(`environment synced: ${summarize(env)}`);
 
+  const previous = await liveRelease(api, scriptId);
   await api.scripts.uploadCode(scriptId, preamble({ id, site }) + bundle);
   await api.scripts.publish(scriptId, note ?? `bunny-edge-deploy ${new Date().toISOString()}`);
   const release = (await api.scripts.activeRelease(scriptId)).Uuid;
   log(`published release ${release}`);
+  await purgeTwice({ api, pullZone, sleep });
 
-  await api.pullZones.purgeAll(pullZone.Id);
-  await sleep(SETTLE_MS);
-  await api.pullZones.purgeAll(pullZone.Id);
-
-  const staticPath = smokeStaticPath ?? (local.find((f) => isHashedAsset(f.path)) ?? local[0]).path;
+  const staticPath = smokeStaticPath ?? defaultStaticPath(local);
   const smoke = await smokeTest({ hostname, staticPath, serverRoute, fetch, sleep, retryForMs: smokeRetryForMs });
-  if (smoke.errors.length > 0) throw new Error(`smoke test failed:\n${smoke.errors.join("\n")}`);
+  if (smoke.errors.length > 0) {
+    const outcome = await rollBackRelease({ api, pullZone, sleep, scriptId, release, previous, id });
+    throw new Error(`smoke test failed:\n${smoke.errors.join("\n")}\n${outcome}`);
+  }
 
   const pruned = await pruneFolders({ storage, id, keepDeploys, log });
   return { deployId: id, uploaded: plan.upload.map((f) => f.path), unchanged: plan.unchanged, pruned, environment: env, release, smoke };
@@ -57,7 +58,9 @@ export async function deployStatic({
   const text = (path) => local.find((f) => f.path === path)?.bytes.toString("utf8");
   const files = local.map((f) => f.path);
   const rules = siteRules({ storageZone, deployId: id, files, headers: parseHeaders(text("_headers")), redirects: parseRedirects(text("_redirects")) });
-  await assertRuleBudget({ api, pullZone, rules });
+  const { EdgeRules: current = [] } = await api.pullZones.get(pullZone.Id);
+  checkRuleBudget(current, rules);
+  const live = servedDeploy(current);
   const plan = await uploadToFolder({ storage, local, id, concurrency, sleep, log });
 
   const { confirmed } = await publish({
@@ -66,12 +69,59 @@ export async function deployStatic({
   });
   log(confirmed ? `published deploy ${id}` : `published deploy ${id}, but the site did not report it within 20 s; the smoke test decides`);
 
-  const staticPath = smokeStaticPath ?? (local.find((f) => isHashedAsset(f.path)) ?? local[0]).path;
-  const smoke = await smokeTest({ hostname, staticPath, serverRoute, fetch, sleep, retryForMs: smokeRetryForMs });
-  if (smoke.errors.length > 0) throw new Error(`smoke test failed:\n${smoke.errors.join("\n")}`);
+  const staticPath = smokeStaticPath ?? defaultStaticPath(local);
+  const smoke = await smokeTest({ hostname, staticPath, serverRoute, deployId: id, fetch, sleep, retryForMs: smokeRetryForMs });
+  if (smoke.errors.length > 0) {
+    const outcome = await rollBackFolder({ api, storage, fetch, sleep, publish, storageZone, pullZone, hostname, id, live });
+    throw new Error(`smoke test failed:\n${smoke.errors.join("\n")}\n${outcome}`);
+  }
 
   const pruned = await pruneFolders({ storage, id, keepDeploys, log });
   return { deployId: id, uploaded: plan.upload.map((f) => f.path), unchanged: plan.unchanged, pruned, confirmed, smoke };
+}
+
+const defaultStaticPath = (local) => (local.find((f) => isHashedAsset(f.path)) ?? local.find((f) => !["_headers", "_redirects"].includes(f.path))).path;
+
+async function purgeTwice({ api, pullZone, sleep }) {
+  await api.pullZones.purgeAll(pullZone.Id);
+  await sleep(SETTLE_MS);
+  await api.pullZones.purgeAll(pullZone.Id);
+}
+
+// A script that was never published answers 404 for its active release.
+async function liveRelease(api, scriptId) {
+  try {
+    return (await api.scripts.activeRelease(scriptId)).Uuid;
+  } catch (error) {
+    if (error.status === 404) return undefined;
+    throw error;
+  }
+}
+
+// Variables and secrets belong to the script, not to a release, so a rollback leaves them as this deploy set them.
+async function rollBackRelease({ api, pullZone, sleep, scriptId, release, previous, id }) {
+  if (!previous) return `release ${release} stays live: there is no earlier release to roll back to`;
+  try {
+    await api.scripts.publishRelease(scriptId, previous, `bunny-edge-deploy rollback from deploy ${id}`);
+    await purgeTwice({ api, pullZone, sleep });
+    return `release ${release} was rolled back to release ${previous}; variables and secrets keep the values this deploy set`;
+  } catch (error) {
+    return `rolling back to release ${previous} failed: ${error.message}`;
+  }
+}
+
+async function rollBackFolder({ api, storage, fetch, sleep, publish, storageZone, pullZone, hostname, id, live }) {
+  if (!live) return `deploy ${id} stays live: there is no earlier deploy to roll back to`;
+  try {
+    const folder = deployFolder(live);
+    const files = (await storage.listAll(folder)).map((file) => file.path.slice(folder.length + 1));
+    const text = async (name) => (files.includes(name) ? (await storage.download(`${folder}/${name}`))?.toString("utf8") : undefined);
+    const rules = siteRules({ storageZone, deployId: live, files, headers: parseHeaders(await text("_headers")), redirects: parseRedirects(await text("_redirects")) });
+    await publish({ api, fetch, sleep, pullZone, storageZone, hostname, deployId: live, rules, notFound: notFoundSettings({ deployId: live, files }) });
+    return `deploy ${id} was rolled back to deploy ${live}`;
+  } catch (error) {
+    return `rolling back to deploy ${live} failed: ${error.message}`;
+  }
 }
 
 async function uploadToFolder({ storage, local, id, concurrency, sleep, log }) {

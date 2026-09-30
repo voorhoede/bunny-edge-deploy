@@ -61,10 +61,10 @@ inputs:
     description: Deploy folders to keep in the storage zone, newest first, and with them the releases you can roll back to. The live deploy is always kept. Older folders are deleted after a deploy passes its smoke test.
     default: "3"
   smoke-route:
-    description: Server-rendered route requested by the smoke test after the deploy.
+    description: Route requested by the smoke test after the deploy. It must answer 2xx or 3xx, so a / that redirects to a language passes.
     default: /
   smoke-static-path:
-    description: Static file path requested by the smoke test. Defaults to the first hashed asset in the client dir, else its first file.
+    description: Static file path requested by the smoke test, with or without a leading slash. Defaults to the first hashed asset in the assets dir, else its first file other than _headers and _redirects.
     default: ""
   concurrency:
     description: Parallel storage uploads.

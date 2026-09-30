@@ -52,6 +52,42 @@ describe("smokeTest", () => {
     assert.equal(calls.length, 4);
   });
 
+  it("accepts a redirect from the route, since a site may send / on to a language", async () => {
+    const { fetch } = fetchWith({ "/assets/app.abc12345.js": { headers: cdn() }, "/": { status: 302, headers: cdn({ location: "/en/" }) } });
+    const result = await smokeTest({ hostname: "site.b-cdn.net", staticPath: "assets/app.abc12345.js", serverRoute: "/", fetch, ...noWait });
+    assert.deepEqual(result.errors, []);
+    assert.deepEqual(result.checks.map((c) => [c.kind, c.status]), [["static file", 200], ["route", 302]]);
+  });
+
+  it("still fails a redirect from the static file, which should be served as it is", async () => {
+    const { fetch } = fetchWith({ "/assets/app.abc12345.js": { status: 301, headers: cdn({ location: "/elsewhere" }) }, "/": { headers: cdn() } });
+    const result = await smokeTest({ hostname: "site.b-cdn.net", staticPath: "assets/app.abc12345.js", serverRoute: "/", fetch, ...noWait });
+    assert.match(result.errors[0], /static file.*301/);
+  });
+
+  it("takes a static path with or without its leading slash", async () => {
+    const { fetch, calls } = fetchWith({ "/assets/app.abc12345.js": { headers: cdn() }, "/": { headers: cdn() } });
+    await smokeTest({ hostname: "site.b-cdn.net", staticPath: "/assets/app.abc12345.js", serverRoute: "/", fetch, ...noWait });
+    assert.equal(new URL(calls[0].url).pathname, "/assets/app.abc12345.js");
+  });
+
+  it("given a deploy id, retries until both answers name that deploy in X-Bunny-Deploy", async () => {
+    const { fetch, calls } = fetchWith({
+      "/assets/app.abc12345.js": [{ headers: cdn({ "x-bunny-deploy": "0ld000000000" }) }, { headers: cdn({ "x-bunny-deploy": "9e9000000000" }) }],
+      "/": [{ headers: cdn({ "x-bunny-deploy": "9e9000000000" }) }],
+    });
+    const result = await smokeTest({ hostname: "site.b-cdn.net", staticPath: "assets/app.abc12345.js", serverRoute: "/", deployId: "9e9000000000", fetch, ...noWait });
+    assert.deepEqual(result.errors, []);
+    assert.equal(calls.length, 3);
+  });
+
+  it("given a deploy id, fails when an answer still names another deploy at the deadline", async () => {
+    const { fetch } = fetchWith({ "/assets/app.abc12345.js": { headers: cdn({ "x-bunny-deploy": "9e9000000000" }) }, "/": { headers: cdn({ "x-bunny-deploy": "0ld000000000" }) } });
+    const result = await smokeTest({ hostname: "site.b-cdn.net", staticPath: "assets/app.abc12345.js", serverRoute: "/", deployId: "9e9000000000", fetch, ...noWait });
+    assert.equal(result.errors.length, 1);
+    assert.match(result.errors[0], /route \/ .*deploy 0ld000000000.*not 9e9000000000/);
+  });
+
   it("gives up retrying after the deadline and reports the last status", async () => {
     const { fetch } = fetchWith({ "/assets/app.abc12345.js": { status: 403 }, "/": { headers: cdn() } });
     const result = await smokeTest({ hostname: "site.b-cdn.net", staticPath: "assets/app.abc12345.js", serverRoute: "/", fetch, ...noWait });

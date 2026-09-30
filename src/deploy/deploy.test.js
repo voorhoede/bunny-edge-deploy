@@ -20,8 +20,10 @@ async function build(files) {
 
 const checksum = (text) => createHash("sha256").update(text).digest("hex").toUpperCase();
 
-function fakes({ remote = () => [], folders = [], edgeRules = [] } = {}) {
+function fakes({ remote = () => [], folders = [], edgeRules = [], downloads = {} } = {}) {
   const events = [];
+  const served = {};
+  const publishes = [];
   let inFlight = 0;
   let maxInFlight = 0;
   const storage = {
@@ -35,20 +37,27 @@ function fakes({ remote = () => [], folders = [], edgeRules = [] } = {}) {
       inFlight -= 1;
       events.push(["upload", path, contentType]);
     },
+    download: async (path) => (downloads[path] === undefined ? undefined : Buffer.from(downloads[path])),
   };
   const api = {
     scripts: {
       uploadCode: async (id, code) => events.push(["uploadCode", code]),
       publish: async (id, note) => events.push(["publish", note]),
+      publishRelease: async (id, uuid) => events.push(["publishRelease", uuid]),
       activeRelease: async () => ({ Uuid: "sjSMbTEz" }),
       variables: { list: async () => [], upsert: async (id, v) => { events.push(["var", v.name]); return "created"; } },
       secrets: { list: async () => [], upsert: async (id, s) => { events.push(["secret", s.name]); return "created"; } },
     },
     pullZones: { get: async () => ({ EdgeRules: edgeRules }), purgeAll: async (id) => events.push(["purgeAll", id]) },
   };
-  const fetch = async (url) => { events.push(["smoke", new URL(url).pathname]); return new Response("ok", { headers: { "cdn-cache": "MISS", "cache-control": "public, max-age=60" } }); };
+  const fetch = async (url) => {
+    events.push(["smoke", new URL(url).pathname]);
+    return new Response("ok", { headers: { "cdn-cache": "MISS", "cache-control": "public, max-age=60", ...(served.deployId && { "x-bunny-deploy": served.deployId }) } });
+  };
   const sleep = async (ms) => events.push(["sleep", ms]);
-  return { storage, api, fetch, sleep, events, maxInFlight: () => maxInFlight };
+  // Stands in for publishing a static site: the fake CDN then answers for that deploy.
+  const publish = async (args) => { events.push(["publish"]); publishes.push(args); served.deployId = args.deployId; return { confirmed: true }; };
+  return { storage, api, fetch, sleep, publish, publishes, events, maxInFlight: () => maxInFlight };
 }
 
 const files = { "about/index.html": "<h1>", "_astro/about.DFbA8egk.css": "css" };
@@ -118,6 +127,43 @@ describe("deploy", () => {
     assert.ok(!events.some((e) => e[0] === "listFolders" || e[0] === "removeFolder"));
   });
 
+  it("rolls back to the release that was live when the smoke test fails, then fails naming both", async () => {
+    const manifest = await build(files);
+    const { storage, api, sleep, events } = fakes({ folders: [{ name: "000000000001", created: "2026-09-01T00:00:00" }] });
+    let active = { Uuid: "oldRelea" };
+    api.scripts.activeRelease = async () => active;
+    api.scripts.publish = async () => { events.push(["publish"]); active = { Uuid: "newRelea" }; };
+    const fetch = async () => new Response("nope", { status: 500, headers: { "cdn-cache": "MISS" } });
+    await assert.rejects(deploy({ api, storage, fetch, sleep, manifest, environment: { variables: [], secrets: [] }, ...common, smokeRetryForMs: 0 }), (error) => {
+      assert.match(error.message, /smoke test failed/);
+      assert.match(error.message, /release newRelea.*rolled back to release oldRelea/);
+      return true;
+    });
+    const rollback = events.findIndex((e) => e[0] === "publishRelease");
+    assert.deepEqual(events[rollback], ["publishRelease", "oldRelea"]);
+    assert.ok(events.slice(rollback).some((e) => e[0] === "purgeAll"));
+    assert.ok(!events.some((e) => e[0] === "removeFolder"));
+  });
+
+  it("fails without rolling back when no release was live before this deploy", async () => {
+    const manifest = await build(files);
+    const { storage, api, sleep, events } = fakes();
+    let published = false;
+    api.scripts.activeRelease = async () => { if (!published) throw Object.assign(new Error("Bunny API 404"), { status: 404 }); return { Uuid: "newRelea" }; };
+    api.scripts.publish = async () => { published = true; };
+    const fetch = async () => new Response("nope", { status: 500, headers: { "cdn-cache": "MISS" } });
+    await assert.rejects(deploy({ api, storage, fetch, sleep, manifest, environment: { variables: [], secrets: [] }, ...common, smokeRetryForMs: 0 }), /smoke test failed[\s\S]*no earlier release to roll back to/);
+    assert.ok(!events.some((e) => e[0] === "publishRelease"));
+  });
+
+  it("reports both failures when rolling back fails too", async () => {
+    const manifest = await build(files);
+    const { storage, api, sleep } = fakes();
+    api.scripts.publishRelease = async () => { throw new Error("Bunny API 500"); };
+    const fetch = async () => new Response("nope", { status: 500, headers: { "cdn-cache": "MISS" } });
+    await assert.rejects(deploy({ api, storage, fetch, sleep, manifest, environment: { variables: [], secrets: [] }, ...common, smokeRetryForMs: 0 }), /smoke test failed[\s\S]*rolling back to release sjSMbTEz failed: Bunny API 500/);
+  });
+
   it("bounds upload concurrency", async () => {
     const manifest = await build(Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`f${i}.txt`, `x${i}`])));
     const { storage, api, fetch, sleep, maxInFlight } = fakes();
@@ -160,10 +206,8 @@ describe("deployStatic", () => {
   it("uploads the build into its folder, publishes that folder, smoke tests, then prunes, and never touches a script", async () => {
     const manifest = await staticBuild(site);
     const probe = fakes();
-    const { deployId } = await deployStatic({ ...probe, publish: async () => ({ confirmed: true }), manifest, ...staticCommon });
-    const { storage, api, fetch, sleep, events } = fakes({ folders: [{ name: "000000000001", created: "2026-09-01T00:00:00" }, { name: deployId, created: "2026-09-30T00:00:00" }] });
-    const publishes = [];
-    const publish = async (args) => { events.push(["publish"]); publishes.push(args); return { confirmed: true }; };
+    const { deployId } = await deployStatic({ ...probe, manifest, ...staticCommon });
+    const { storage, api, fetch, sleep, publish, publishes, events } = fakes({ folders: [{ name: "000000000001", created: "2026-09-01T00:00:00" }, { name: deployId, created: "2026-09-30T00:00:00" }] });
     const result = await deployStatic({ api, storage, fetch, sleep, publish, manifest, ...staticCommon, keepDeploys: 1 });
     const order = events.map((e) => e[0]).filter((k, i, all) => k !== all[i - 1]);
     assert.deepEqual(order, ["list", "upload", "publish", "smoke", "listFolders", "removeFolder"]);
@@ -177,25 +221,65 @@ describe("deployStatic", () => {
 
   it("publishes the build's _headers and _redirects as rules", async () => {
     const manifest = await staticBuild({ ...site, "_redirects": "/old /about 301!\n" });
-    const { storage, api, fetch, sleep } = fakes();
-    const publishes = [];
-    await deployStatic({ api, storage, fetch, sleep, publish: async (args) => { publishes.push(args); return { confirmed: true }; }, manifest, ...staticCommon });
+    const { storage, api, fetch, sleep, publish, publishes } = fakes();
+    await deployStatic({ api, storage, fetch, sleep, publish, manifest, ...staticCommon });
     assert.ok(publishes[0].rules.some((rule) => rule.Description === "bunny-edge-deploy: redirect /old"));
   });
 
   it("refuses before uploading anything when its rules and the zone's other rules would pass Bunny's limit of 50", async () => {
     const manifest = await staticBuild(site);
     const others = Array.from({ length: 50 }, (_, i) => ({ Guid: `g${i}`, Description: `someone else's rule ${i}` }));
-    const { storage, api, fetch, sleep, events } = fakes({ edgeRules: others });
-    await assert.rejects(deployStatic({ api, storage, fetch, sleep, publish: async () => ({ confirmed: true }), manifest, ...staticCommon }), /edge rules.*50/);
+    const { storage, api, fetch, sleep, publish, events } = fakes({ edgeRules: others });
+    await assert.rejects(deployStatic({ api, storage, fetch, sleep, publish, manifest, ...staticCommon }), /edge rules.*50/);
     assert.ok(!events.some((e) => e[0] === "upload"));
   });
 
   it("fails and prunes nothing when the smoke test fails", async () => {
     const manifest = await staticBuild(site);
-    const { storage, api, sleep, events } = fakes({ folders: [{ name: "000000000001", created: "2026-09-01T00:00:00" }] });
+    const { storage, api, sleep, publish, events } = fakes({ folders: [{ name: "000000000001", created: "2026-09-01T00:00:00" }] });
     const fetch = async () => new Response("nope", { status: 500, headers: { "cdn-cache": "MISS" } });
-    await assert.rejects(deployStatic({ api, storage, fetch, sleep, publish: async () => ({ confirmed: true }), manifest, ...staticCommon, smokeRetryForMs: 0 }), /smoke test failed/);
+    await assert.rejects(deployStatic({ api, storage, fetch, sleep, publish, manifest, ...staticCommon, smokeRetryForMs: 0 }), /smoke test failed/);
     assert.ok(!events.some((e) => e[0] === "removeFolder"));
+  });
+
+  it("smoke tests a file the site serves, never _headers or _redirects, and requires the site to answer for the new deploy", async () => {
+    const manifest = await staticBuild({ "_headers": "/x\n  x-a: 1\n", "_redirects": "/old /x 301!\n", "index.html": "<h1>", "x/index.html": "<h1>" });
+    const { storage, api, sleep, publish, events } = fakes();
+    const answered = [];
+    const fetch = async (url) => {
+      const path = new URL(url).pathname;
+      events.push(["smoke", path]);
+      answered.push(path);
+      return new Response("ok", { headers: { "cdn-cache": "MISS", "x-bunny-deploy": "0ld000000000" } });
+    };
+    await assert.rejects(deployStatic({ api, storage, fetch, sleep, publish, manifest, ...staticCommon, smokeRetryForMs: 0 }), /deploy 0ld000000000/);
+    assert.ok(!answered.some((path) => /\/_(headers|redirects)$/.test(path)), answered.join(", "));
+  });
+
+  it("re-points the site at the folder that was live when the smoke test fails, rebuilt from that folder's own _headers and _redirects", async () => {
+    const manifest = await staticBuild(site);
+    const live = "000000000001";
+    const { storage, api, sleep, publish, publishes, events } = fakes({
+      edgeRules: [{ Guid: "g1", Description: "bunny-edge-deploy: serve the published deploy", ActionType: 17, ActionParameter3: `/deploys/${live}/` }],
+      remote: (directory) => (directory === `deploys/${live}` ? ["index.html", "404.html", "_redirects"].map((path) => ({ path: `deploys/${live}/${path}`, checksum: "X" })) : []),
+      downloads: { [`deploys/${live}/_redirects`]: "/legacy /index 301\n" },
+      folders: [{ name: live, created: "2026-09-01T00:00:00" }],
+    });
+    const fetch = async () => new Response("nope", { status: 500, headers: { "cdn-cache": "MISS" } });
+    await assert.rejects(deployStatic({ api, storage, fetch, sleep, publish, manifest, ...staticCommon, smokeRetryForMs: 0 }), /smoke test failed[\s\S]*deploy [0-9a-f]{12}.*rolled back to deploy 000000000001/);
+    assert.equal(publishes.length, 2);
+    assert.equal(publishes[1].deployId, live);
+    assert.ok(publishes[1].rules.some((rule) => rule.ActionParameter3 === `/deploys/${live}/`));
+    assert.ok(publishes[1].rules.some((rule) => rule.Description === "bunny-edge-deploy: redirect /legacy"));
+    assert.deepEqual(publishes[1].notFound, { Custom404FilePath: `/deploys/${live}/404.html`, Rewrite404To200: false });
+    assert.ok(!events.some((e) => e[0] === "removeFolder"));
+  });
+
+  it("fails without rolling back on the first deploy to a zone", async () => {
+    const manifest = await staticBuild(site);
+    const { storage, api, sleep, publish, publishes } = fakes();
+    const fetch = async () => new Response("nope", { status: 500, headers: { "cdn-cache": "MISS" } });
+    await assert.rejects(deployStatic({ api, storage, fetch, sleep, publish, manifest, ...staticCommon, smokeRetryForMs: 0 }), /smoke test failed[\s\S]*no earlier deploy to roll back to/);
+    assert.equal(publishes.length, 1);
   });
 });

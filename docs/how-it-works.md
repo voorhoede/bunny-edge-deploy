@@ -23,7 +23,7 @@ For a **static build**:
 
 Both again:
 
-7. **Smoke test** one static file and `smoke-route` through the pull zone. A non-2xx answer, or one that did not pass through Bunny, fails the workflow; set `smoke-route` to a page when `/` redirects.
+7. **Smoke test** one static file and `smoke-route` through the pull zone. The file must answer 2xx and the route 2xx or 3xx, both through Bunny; a static build must also answer for the new deploy in `X-Bunny-Deploy`. When the smoke test fails, the deploy that was live before is published again and the workflow fails ([Rollback](#rollback)).
 8. **Prune**: delete every deploy folder except the newest `keep-deploys` (default 3) and the live one. This only happens after the smoke test passes.
 
 ## Caching
@@ -62,6 +62,10 @@ A server build also pays for Edge Scripting: $0.20 per million requests plus $0.
 `monthly-bandwidth-limit-gb` is a cost guard: the zone stops serving when the limit is reached, so it is off by default.
 
 ## Rollback
+
+A deploy that fails its smoke test is rolled back automatically: a server build publishes the release that was live before it, and a static build points the edge rules at the folder that was live, with that folder's own `_headers`, `_redirects` and `404.html`. The workflow then fails and names both deploys. On a zone's first deploy there is nothing to roll back to, so the failed deploy stays live.
+
+To roll back by hand:
 
 **Server build.** Every deploy publishes a new release; the `release` output holds its id. To roll back, publish an earlier release in the Bunny dashboard (Script > Deployments > Publish) or with the API:
 
