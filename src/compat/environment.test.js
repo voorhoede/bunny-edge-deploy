@@ -27,6 +27,23 @@ describe("parseEnvironment", () => {
     assert.deepEqual(fine.errors, []);
   });
 
+  it("warns about a value wrapped in matching quotes, which are kept as part of the value, without repeating a secret", () => {
+    const result = parseEnvironment({ env: `A="quoted"\nB='single'\nC=plain"`, secrets: `S="shh"` });
+    assert.equal(result.variables[0].value, '"quoted"');
+    assert.equal(result.warnings.length, 3);
+    assert.match(result.warnings[0], /env A.*quotes/);
+    assert.match(result.warnings[1], /env B.*quotes/);
+    assert.match(result.warnings[2], /secrets S.*quotes/);
+    assert.ok(!result.warnings.join("\n").includes("shh"));
+  });
+
+  it("does not repeat an invalid name from the secrets input, which may be a pasted value", () => {
+    const result = parseEnvironment({ env: "", secrets: "abc+def==" });
+    assert.equal(result.errors.length, 1);
+    assert.match(result.errors[0], /secrets line 1/);
+    assert.ok(!result.errors[0].includes("abc+def"));
+  });
+
   it("never puts secret values in errors", () => {
     const result = parseEnvironment({ env: "", secrets: `S=${"topsecret".repeat(300)}` });
     assert.ok(result.errors.length > 0);

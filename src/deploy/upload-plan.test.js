@@ -23,29 +23,18 @@ describe("contentTypeFor", () => {
 });
 
 describe("planUpload", () => {
-  const local = [
-    { path: "index.html", checksum: "H1" },
-    { path: "about/index.html", checksum: "H2" },
-    { path: "assets/app.abc12345.js", checksum: "A1" },
-    { path: "assets/style.def67890.css", checksum: "S1" },
-  ];
-  const remote = [
-    { path: "index.html", checksum: "OLD" },
-    { path: "about/index.html", checksum: "H2" },
-    { path: "assets/app.abc12345.js", checksum: "A1" },
-    { path: "assets/old.11112222.js", checksum: "O1" },
-    { path: ".bunny-edge-deploy/state.json", checksum: "X" },
-  ];
-
-  it("uploads new and changed files, hashed assets first, skips unchanged, and lists stale remote files", () => {
-    const plan = planUpload({ local, remote, statePath: ".bunny-edge-deploy/state.json" });
-    assert.deepEqual(plan.upload.map((f) => f.path), ["assets/style.def67890.css", "index.html"]);
-    assert.deepEqual(plan.unchanged, ["about/index.html", "assets/app.abc12345.js"]);
-    assert.deepEqual(plan.stale, ["assets/old.11112222.js"]);
-  });
-
-  it("marks which uploaded and stale paths are unhashed, for targeted purges", () => {
-    const plan = planUpload({ local, remote, statePath: ".bunny-edge-deploy/state.json" });
-    assert.deepEqual(plan.changedUnhashed, ["index.html"]);
+  it("uploads new and changed files and skips the ones already there", () => {
+    const local = [
+      { path: "index.html", checksum: "H1" },
+      { path: "about/index.html", checksum: "H2" },
+      { path: "_astro/app.DFbA8egk.css", checksum: "A1" },
+    ];
+    const remote = [
+      { path: "index.html", checksum: "OLD" },
+      { path: "about/index.html", checksum: "H2" },
+    ];
+    const plan = planUpload({ local, remote });
+    assert.deepEqual(plan.upload.map((f) => f.path), ["index.html", "_astro/app.DFbA8egk.css"]);
+    assert.deepEqual(plan.unchanged, ["about/index.html"]);
   });
 });

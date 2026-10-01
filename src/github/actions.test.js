@@ -7,23 +7,23 @@ import { createActionsIo, readInputs } from "./actions.js";
 
 describe("readInputs", () => {
   it("reads INPUT_ variables by dashed name and applies types and defaults", () => {
-    const env = { "INPUT_CLIENT-DIR": "dist/client", INPUT_ENV: "A=1\nB=2", "INPUT_PRUNE-SECRETS": "true", "INPUT_KEEP-STALE-DEPLOYS": "5", "INPUT_PRICING-REGIONS": "EU, US" };
+    const env = { "INPUT_BUNNY-API-KEY": "key", INPUT_ENV: "A=1\nB=2", "INPUT_STALE-WHILE-UPDATING": "true", "INPUT_KEEP-DEPLOYS": "5", "INPUT_PRICING-REGIONS": "EU, US" };
     const inputs = readInputs(env, {
-      "client-dir": { required: true },
+      "bunny-api-key": { required: true },
       env: { default: "" },
-      "prune-secrets": { type: "boolean", default: false },
-      "keep-stale-deploys": { type: "integer", default: 3 },
+      "stale-while-updating": { type: "boolean", default: false },
+      "keep-deploys": { type: "integer", default: 3 },
       "pricing-regions": { type: "list", default: ["EU"] },
       "storage-region": { default: "DE" },
     });
-    assert.deepEqual(inputs, { "client-dir": "dist/client", env: "A=1\nB=2", "prune-secrets": true, "keep-stale-deploys": 5, "pricing-regions": ["EU", "US"], "storage-region": "DE" });
+    assert.deepEqual(inputs, { "bunny-api-key": "key", env: "A=1\nB=2", "stale-while-updating": true, "keep-deploys": 5, "pricing-regions": ["EU", "US"], "storage-region": "DE" });
   });
 
   it("throws a clear error for a missing required input, an invalid boolean or integer, and an unknown choice", () => {
-    assert.throws(() => readInputs({}, { "client-dir": { required: true } }), /input "client-dir" is required/);
+    assert.throws(() => readInputs({}, { "bunny-api-key": { required: true } }), /input "bunny-api-key" is required/);
     assert.throws(() => readInputs({ INPUT_X: "yes" }, { x: { type: "boolean" } }), /"x" must be true or false/);
     assert.throws(() => readInputs({ INPUT_X: "many" }, { x: { type: "integer" } }), /"x" must be an integer/);
-    assert.throws(() => readInputs({ INPUT_X: "tiny" }, { x: { choices: ["full", "targeted"] } }), /"x" must be one of full, targeted/);
+    assert.throws(() => readInputs({ INPUT_X: "tiny" }, { x: { choices: ["standard", "edge"] } }), /"x" must be one of standard, edge/);
   });
 });
 

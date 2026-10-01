@@ -1,15 +1,19 @@
-import { join } from "node:path";
+import { resolve } from "node:path";
 import { createBunnyApi as defaultCreateBunnyApi } from "./bunny/api.js";
 import { createStorageClient as defaultCreateStorageClient } from "./bunny/storage.js";
-import { analyzeClientDir } from "./compat/client-dir.js";
+import { readBuildManifest } from "./build-manifest/build-manifest.js";
+import { analyzeAssetsDir } from "./compat/assets-dir.js";
 import { parseEnvironment } from "./compat/environment.js";
-import { analyzeServerEntry, probeServerEntry as defaultProbeServerEntry } from "./compat/server-entry.js";
-import { deploy as defaultDeploy } from "./deploy/deploy.js";
-import { provision as defaultProvision } from "./provision/provision.js";
+import { analyzeScript, probeScript as defaultProbeScript } from "./compat/script.js";
+import { deploy as defaultDeploy, deployStatic as defaultDeployStatic } from "./deploy/deploy.js";
+import { openDeployment as defaultOpenDeployment } from "./github/deployments.js";
+import { PLATFORM_NAMES, platformEnvironment } from "./deploy/platform-env.js";
+import { provision as defaultProvision, provisionStatic as defaultProvisionStatic } from "./provision/provision.js";
+import { readSiteConfig } from "./static-site/parse.js";
+import { analyzeSiteConfig } from "./static-site/rules.js";
 
 export const INPUT_SCHEMA = {
-  "client-dir": { required: true },
-  "server-entry": { required: true },
+  "build-manifest": { default: ".bunny/build.json" },
   "bunny-api-key": { required: true },
   env: { type: "multiline", default: "" },
   secrets: { type: "multiline", default: "" },
@@ -26,27 +30,42 @@ export const INPUT_SCHEMA = {
   "stale-while-updating": { type: "boolean", default: false },
   "script-size-limit-mb": { type: "integer", default: 8 },
   "startup-limit-ms": { type: "integer", default: 500 },
-  "keep-stale-deploys": { type: "integer", default: 3 },
-  purge: { choices: ["full", "targeted"], default: "full" },
-  "cache-tag": { default: "" },
+  "keep-deploys": { type: "integer", default: 3 },
   "smoke-route": { default: "/" },
   "smoke-static-path": { default: "" },
   concurrency: { type: "integer", default: 8 },
   "release-note": { default: "" },
+  "github-environment": { default: "production" },
+  "github-token": { default: "" },
 };
 
 export async function run({
   inputs, actions, env = process.env,
-  provision = defaultProvision, deploy = defaultDeploy, probeServerEntry = defaultProbeServerEntry,
-  createBunnyApi = defaultCreateBunnyApi, createStorageClient = defaultCreateStorageClient,
+  provision = defaultProvision, deploy = defaultDeploy, probeScript = defaultProbeScript,
+  provisionStatic = defaultProvisionStatic, deployStatic = defaultDeployStatic,
+  createBunnyApi = defaultCreateBunnyApi, createStorageClient = defaultCreateStorageClient, openDeployment = defaultOpenDeployment,
 }) {
   const options = { ...defaults(), ...inputs };
   actions.mask(options["bunny-api-key"]);
+  if (options["github-token"]) actions.mask(options["github-token"]);
   const environment = parseEnvironment({ env: options.env, secrets: options.secrets });
   for (const secret of environment.secrets) actions.mask(secret.value);
 
-  const compat = await actions.group("Compatibility check", () => checkCompatibility({ options, environment, actions, probeServerEntry }));
+  const record = await openDeployment({ env, token: options["github-token"], environment: options["github-environment"], warn: actions.warning });
+  try {
+    const deployed = await deployBuild({ options, actions, env, environment, provision, deploy, probeScript, provisionStatic, deployStatic, createBunnyApi, createStorageClient });
+    await record?.succeed({ url: `https://${deployed.hostname}`, deployId: deployed.deployId });
+    return deployed;
+  } catch (error) {
+    await record?.fail(error.message);
+    throw error;
+  }
+}
+
+async function deployBuild({ options, actions, env, environment, provision, deploy, probeScript, provisionStatic, deployStatic, createBunnyApi, createStorageClient }) {
+  const compat = await actions.group("Compatibility check", () => checkCompatibility({ options, environment, actions, probeScript }));
   if (compat.errors.length > 0) throw new Error(`compatibility check failed with ${compat.errors.length} problem(s)`);
+  const { manifest } = compat;
 
   const baseName = options.name || nameFromRepository(env.GITHUB_REPOSITORY);
   const config = {
@@ -62,51 +81,120 @@ export async function run({
     monthlyBandwidthLimit: options["monthly-bandwidth-limit-gb"] * 1000 ** 3,
   };
   const api = createBunnyApi({ apiKey: options["bunny-api-key"] });
-  const provisioned = await actions.group("Provision", async () => {
-    const result = await provision({ api, config });
-    for (const item of result.created) actions.info(`created ${item}`);
-    for (const warning of result.warnings) actions.warning(warning);
-    for (const item of result.drift) actions.warning(`drift: ${item}`);
-    return result;
-  });
-  actions.mask(provisioned.storageZone.Password);
-  const storage = createStorageClient({ hostname: provisioned.storageZone.StorageHostname, zoneName: provisioned.storageZone.Name, password: provisioned.storageZone.Password });
+  const shared = { options, actions, env, config, api, manifest, compat, createStorageClient };
+  return manifest.kind === "static"
+    ? runStatic({ ...shared, provisionStatic, deployStatic })
+    : runServer({ ...shared, environment, provision, deploy });
+}
+
+async function runServer({ options, env, actions, config, api, manifest, compat, environment, provision, deploy, createStorageClient }) {
+  const provisioned = await provisionLogged(actions, () => provision({ api, config, pullZoneRequirements: manifest.requires.pullZone }));
+  const storage = storageClient({ provisioned, actions, createStorageClient });
+  const platform = platformEnvironment({ requires: manifest.requires, storageZone: provisioned.storageZone, pullZone: provisioned.pullZone });
 
   const result = await actions.group("Deploy", () => deploy({
     api, storage, log: actions.info,
-    clientDir: options["client-dir"], serverEntry: options["server-entry"],
+    manifest, site: config.pullZoneName,
     pullZone: provisioned.pullZone, hostname: provisioned.hostname, scriptId: provisioned.script.Id,
-    environment: { variables: environment.variables, secrets: environment.secrets },
-    keepStaleDeploys: options["keep-stale-deploys"], concurrency: options.concurrency,
-    purge: options.purge, cacheTag: options["cache-tag"] || undefined,
+    environment: { variables: [...platform.variables, ...environment.variables], secrets: [...platform.secrets, ...environment.secrets] },
+    concurrency: options.concurrency, keepDeploys: options["keep-deploys"],
     serverRoute: options["smoke-route"], smokeStaticPath: options["smoke-static-path"] || undefined,
     note: options["release-note"] || `${env.GITHUB_REPOSITORY ?? "bunny-edge-deploy"}@${(env.GITHUB_SHA ?? "").slice(0, 7)} run ${env.GITHUB_RUN_NUMBER ?? ""}`.trim(),
   }));
   for (const warning of result.smoke.warnings) actions.warning(warning);
   const onlyOnScript = [...result.environment.notInInput.variables, ...result.environment.notInInput.secrets];
   if (onlyOnScript.length > 0) actions.info(`on the script but not in the workflow: ${onlyOnScript.join(", ")}`);
+  const supplied = new Set([...environment.variables, ...environment.secrets].map((e) => e.name).concat(onlyOnScript));
+  for (const name of platform.missing.filter((n) => !supplied.has(n))) actions.warning(`the build requires ${name}, which neither the action nor the workflow sets; add it to secrets or env, or set it on the script in the dashboard`);
 
   await actions.setOutput("hostname", provisioned.hostname);
   await actions.setOutput("release", result.release);
+  await actions.setOutput("deploy-id", result.deployId);
   await actions.setOutput("pull-zone-id", String(provisioned.pullZone.Id));
   await actions.setOutput("storage-zone-id", String(provisioned.storageZone.Id));
   await actions.setOutput("script-id", String(provisioned.script.Id));
-  await actions.summary(summary({ provisioned, result, compat }));
-  return result;
+  await actions.summary(summary({
+    provisioned, result, compat, commit: env.GITHUB_SHA,
+    rollback: `Release \`${result.release}\`, deploy \`${result.deployId}\`. Roll back by publishing an earlier release in the Bunny dashboard or with \`POST /compute/script/${provisioned.script.Id}/publish/<release id>\`; each release reads its own deploy folder, so its files come back with it while that folder is kept.`,
+    sections: [`### Environment\n- variables: ${result.environment.variables.added.length} added, ${result.environment.variables.changed.length} changed\n- secrets: ${result.environment.secrets.added.length} added, ${result.environment.secrets.updated.length} updated\n- on the script but not in the workflow: ${onlyOnScript.join(", ") || "none"}`],
+  }));
+  return { ...result, hostname: provisioned.hostname };
 }
 
-async function checkCompatibility({ options, environment, actions, probeServerEntry }) {
-  const server = await analyzeServerEntry({ path: options["server-entry"], sizeLimit: options["script-size-limit-mb"] * 1024 * 1024 });
-  const probe = server.errors.length === 0 ? await probeServerEntry({ path: options["server-entry"], startupLimitMs: options["startup-limit-ms"] }) : { skipped: true, errors: [] };
-  const client = await analyzeClientDir({ path: options["client-dir"] });
-  const errors = [...server.errors, ...probe.errors, ...client.errors, ...environment.errors];
-  const warnings = [...server.warnings, ...client.warnings];
-  if (probe.skipped && probe.notice) actions.warning(probe.notice);
+async function runStatic({ options, actions, env, config, api, manifest, compat, provisionStatic, deployStatic, createStorageClient }) {
+  const provisioned = await provisionLogged(actions, () => provisionStatic({ api, config }));
+  const storage = storageClient({ provisioned, actions, createStorageClient });
+
+  const result = await actions.group("Deploy", () => deployStatic({
+    api, storage, log: actions.info, manifest,
+    storageZone: provisioned.storageZone, pullZone: provisioned.pullZone, hostname: provisioned.hostname,
+    concurrency: options.concurrency, keepDeploys: options["keep-deploys"],
+    serverRoute: options["smoke-route"], smokeStaticPath: options["smoke-static-path"] || undefined,
+  }));
+  for (const warning of result.smoke.warnings) actions.warning(warning);
+
+  await actions.setOutput("hostname", provisioned.hostname);
+  await actions.setOutput("deploy-id", result.deployId);
+  await actions.setOutput("pull-zone-id", String(provisioned.pullZone.Id));
+  await actions.setOutput("storage-zone-id", String(provisioned.storageZone.Id));
+  await actions.summary(summary({
+    provisioned, result, compat, commit: env.GITHUB_SHA,
+    rollback: `Deploy \`${result.deployId}\`. Roll back by running the deploy of an earlier commit again: the same build reuses its folder while that folder is kept.`,
+    sections: [],
+  }));
+  return { ...result, hostname: provisioned.hostname };
+}
+
+async function provisionLogged(actions, provisionSite) {
+  return actions.group("Provision", async () => {
+    const result = await provisionSite();
+    for (const item of result.created) actions.info(`created ${item}`);
+    for (const item of result.updated) actions.info(`updated ${item}`);
+    for (const warning of result.warnings) actions.warning(warning);
+    for (const item of result.drift) actions.warning(`drift: ${item}`);
+    return result;
+  });
+}
+
+function storageClient({ provisioned, actions, createStorageClient }) {
+  actions.mask(provisioned.storageZone.Password);
+  actions.mask(provisioned.storageZone.ReadOnlyPassword);
+  return createStorageClient({ hostname: provisioned.storageZone.StorageHostname, zoneName: provisioned.storageZone.Name, password: provisioned.storageZone.Password });
+}
+
+async function checkCompatibility({ options, environment, actions, probeScript }) {
+  const read = await readBuildManifest(resolve(options["build-manifest"]));
+  const errors = [...read.errors, ...environment.errors];
+  if (options["keep-deploys"] < 1) errors.push(`keep-deploys is ${options["keep-deploys"]}, but it must be at least 1 so the live deploy keeps its files`);
+  if (options.concurrency < 1) errors.push(`concurrency is ${options.concurrency}, but at least 1 upload has to run at a time`);
+  for (const name of ["script-size-limit-mb", "startup-limit-ms", "monthly-bandwidth-limit-gb"]) {
+    if (options[name] < 0) errors.push(`${name} is ${options[name]}, but it cannot be negative`);
+  }
+  const warnings = [...environment.warnings];
+  if (read.errors.length === 0 && read.manifest.kind === "static") {
+    const { manifest } = read;
+    if (environment.variables.length + environment.secrets.length > 0) errors.push("a static build has no script, so env and secrets have nowhere to go; remove them from the workflow");
+    const client = await analyzeAssetsDir({ path: manifest.assets.dir });
+    const site = analyzeSiteConfig(await readSiteConfig(manifest.assets.dir));
+    errors.push(...client.errors, ...site.errors);
+    warnings.push(...client.warnings, ...site.warnings);
+    actions.info(`${manifest.framework.name} static build by ${manifest.adapter.package}, client files: ${client.files.length}`);
+  } else if (read.errors.length === 0) {
+    const { manifest } = read;
+    errors.push(...[...environment.variables, ...environment.secrets].filter((e) => PLATFORM_NAMES.has(e.name)).map((e) => `"${e.name}" is set by the action from the storage and pull zone; remove it from env and secrets`));
+    const script = await analyzeScript({ path: manifest.script.entry, sizeLimit: options["script-size-limit-mb"] * 1024 * 1024 });
+    const probe = script.errors.length === 0 ? await probeScript({ path: manifest.script.entry, startupLimitMs: options["startup-limit-ms"] }) : { skipped: true, errors: [] };
+    const client = await analyzeAssetsDir({ path: manifest.assets.dir });
+    errors.push(...script.errors, ...probe.errors, ...client.errors);
+    warnings.push(...script.warnings, ...client.warnings);
+    if (probe.skipped && probe.notice) actions.warning(probe.notice);
+    actions.info(`${manifest.framework.name} build by ${manifest.adapter.package}`);
+    actions.info(`script: ${(script.size / 1024).toFixed(1)} KB${probe.skipped ? "" : `, imports in ${probe.importMs} ms`}`);
+    actions.info(`client files: ${client.files.length}, env: ${environment.variables.length} variables and ${environment.secrets.length} secrets`);
+  }
   for (const message of errors) actions.error(message);
   for (const message of warnings) actions.warning(message);
-  actions.info(`server-entry: ${(server.size / 1024).toFixed(1)} KB${probe.skipped ? "" : `, imports in ${probe.importMs} ms, ${probe.registered.onOriginRequest} request and ${probe.registered.onOriginResponse} response middleware`}`);
-  actions.info(`client-dir: ${client.files.length} files, env: ${environment.variables.length} variables and ${environment.secrets.length} secrets`);
-  return { errors, warnings, server, probe, client };
+  return { errors, warnings, manifest: read.manifest };
 }
 
 function defaults() {
@@ -117,22 +205,21 @@ export function nameFromRepository(repository = "") {
   return repository.split("/").pop().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "site";
 }
 
-function summary({ provisioned, result, compat }) {
+function summary({ provisioned, result, compat, commit, rollback, sections }) {
   const list = (items) => (items.length > 0 ? items.map((item) => `- ${item}`).join("\n") : "- none");
   return [
-    `## Deployed to https://${provisioned.hostname}`,
+    `## Deployed ${commit ? `\`${commit.slice(0, 7)}\` ` : ""}to https://${provisioned.hostname}`,
     "",
-    `Release \`${result.release}\`. Roll back in the Bunny dashboard or with \`POST /compute/script/${provisioned.script.Id}/publish/<uuid>\`.`,
+    rollback,
     "",
-    `### Files\n- uploaded ${result.uploaded.length}, unchanged ${result.unchanged.length}, stale ${result.stale.length}, removed ${result.removed.length}`,
+    `### Files\n- uploaded ${result.uploaded.length} to \`deploys/${result.deployId}/\`, ${result.unchanged.length} already there\n- pruned ${result.pruned.length} old deploy folders${result.pruned.length > 0 ? `: ${result.pruned.join(", ")}` : ""}`,
     "",
-    `### Environment\n- variables: ${result.environment.variables.added.length} added, ${result.environment.variables.changed.length} changed\n- secrets: ${result.environment.secrets.added.length} added, ${result.environment.secrets.updated.length} updated\n- on the script but not in the workflow: ${[...result.environment.notInInput.variables, ...result.environment.notInInput.secrets].join(", ") || "none"}`,
-    "",
+    ...sections.flatMap((section) => [section, ""]),
     "### Smoke test",
     result.smoke.checks.map((c) => `- ${c.kind} \`${c.path}\`: ${c.status}, Cache-Control \`${c.cacheControl ?? "none"}\``).join("\n"),
     "",
     "### Provisioning",
-    list([...provisioned.created.map((c) => `created ${c}`), ...provisioned.drift.map((d) => `drift: ${d}`)]),
+    list([...provisioned.created.map((c) => `created ${c}`), ...provisioned.updated.map((u) => `updated ${u}`), ...provisioned.drift.map((d) => `drift: ${d}`)]),
     "",
     compat.warnings.length > 0 ? `### Warnings\n${list(compat.warnings)}\n` : "",
   ].join("\n");

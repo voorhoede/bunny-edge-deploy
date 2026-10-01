@@ -1,20 +1,21 @@
 // Verified on the account: the script fails to boot above 2048 bytes per value or 128 variables; secrets are not counted.
 const MAX_VALUE_BYTES = 2048;
-const MAX_VARIABLES = 128;
+export const MAX_VARIABLES = 128;
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export function parseEnvironment({ env = "", secrets = "" }) {
   const errors = [];
-  const variables = parseLines(env, "env", errors);
-  const secretEntries = parseLines(secrets, "secrets", errors);
+  const warnings = [];
+  const variables = parseLines(env, "env", errors, warnings);
+  const secretEntries = parseLines(secrets, "secrets", errors, warnings);
   const seen = new Map();
   for (const { name } of [...variables, ...secretEntries]) seen.set(name, (seen.get(name) ?? 0) + 1);
   for (const [name, count] of seen) if (count > 1) errors.push(`"${name}" is defined more than once across env and secrets`);
   if (variables.length > MAX_VARIABLES) errors.push(`${variables.length} variables in env, but a script boots with at most ${MAX_VARIABLES}`);
-  return { errors, variables, secrets: secretEntries };
+  return { errors, warnings, variables, secrets: secretEntries };
 }
 
-function parseLines(text, input, errors) {
+function parseLines(text, input, errors, warnings) {
   const entries = [];
   text.split(/\r?\n/).forEach((line, index) => {
     if (line.trim() === "" || line.trimStart().startsWith("#")) return;
@@ -25,7 +26,9 @@ function parseLines(text, input, errors) {
     }
     const name = line.slice(0, separator).trim();
     const value = line.slice(separator + 1);
-    if (!NAME.test(name)) errors.push(`${input} line ${index + 1}: "${name}" is not a valid name (letters, digits and underscores, not starting with a digit)`);
+    // A name that is not valid may be part of a secret pasted on the wrong line, so it is not repeated.
+    if (!NAME.test(name)) errors.push(`${input} line ${index + 1}${input === "secrets" ? "" : `: "${name}"`} has no valid name (letters, digits and underscores, not starting with a digit)`);
+    if (/^(["']).*\1$/s.test(value) && value.length >= 2) warnings.push(`${input} ${name} is wrapped in quotes, which stay part of the value; remove them unless the value needs them`);
     const bytes = Buffer.byteLength(value);
     if (bytes > MAX_VALUE_BYTES) errors.push(`${input} "${name}" is ${bytes} bytes, but a script boots with values of at most ${MAX_VALUE_BYTES} bytes`);
     entries.push({ name, value });

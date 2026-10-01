@@ -1,25 +1,22 @@
 name: Bunny Edge Deploy
-description: Deploy a built website to Bunny.net. Static files go to Bunny Storage behind a CDN pull zone, one server file runs as a middleware edge script.
+description: Deploy the build a Bunny framework adapter describes in .bunny/build.json. Client files go to a Bunny Storage folder per deploy; a server build runs as a standalone edge script behind a CDN pull zone, a static build is served from storage by edge rules.
 author: De Voorhoede
 branding:
   icon: upload-cloud
   color: orange
 
 inputs:
-  client-dir:
-    description: Directory with the static build output, uploaded to the storage zone.
-    required: true
-  server-entry:
-    description: Path to the single self-contained ESM file deployed as the middleware edge script.
-    required: true
+  build-manifest:
+    description: Path to the build manifest the adapter writes, for example `@bunny.net/astro-adapter`. The script entry and assets dir it names are resolved from the directory above `.bunny/`.
+    default: .bunny/build.json
   bunny-api-key:
     description: Bunny.net account API key. Pass it as a secret.
     required: true
   env:
-    description: Runtime environment variables to set on the edge script, one KEY=value per line. Only listed keys are set or updated; nothing is removed. Variables can also be managed in the Bunny dashboard.
+    description: Runtime environment variables to set on the edge script, one KEY=value per line. Everything after the first = is the value, taken literally, so quotes stay part of it. Only listed keys are set or updated; nothing is removed. Variables can also be managed in the Bunny dashboard. Names the action sets from the zones, such as `BUNNY_STORAGE_KEY`, are not allowed, and a static build takes none.
     default: ""
   secrets:
-    description: Encrypted secrets to set on the edge script, one KEY=value per line. Only listed keys are set; nothing is removed. Values are masked in logs and never read back.
+    description: Encrypted secrets to set on the edge script, one KEY=value per line, with the value taken literally like env. Only listed keys are set; nothing is removed. Values are masked in logs and never read back. Like env, names the action sets are not allowed, and a static build takes none.
     default: ""
   name:
     description: Base name for the storage zone, pull zone and script. Defaults to the repository name, lowercased, with anything outside a-z, 0-9 and dashes replaced by a dash. The pull zone name becomes the `<name>.b-cdn.net` hostname and must be unique across Bunny.
@@ -31,7 +28,7 @@ inputs:
     description: Overrides the pull zone name.
     default: ""
   script-name:
-    description: Overrides the edge script name.
+    description: Overrides the edge script name. A static build has no script and ignores it.
     default: ""
   storage-region:
     description: Main storage region code, used when the storage zone is created. DE is Frankfurt. Cannot be changed afterwards.
@@ -55,44 +52,46 @@ inputs:
     description: Serve the cached response while a fresh one is fetched in the background, set when the pull zone is created. Serves the previous version once after each purge.
     default: "false"
   script-size-limit-mb:
-    description: Fail when the server entry is larger than this. Bunny documents 10 MB, but scripts of 9.5 MB and up failed to boot reliably in testing.
+    description: Fail when the script is larger than this. Bunny documents 10 MB, but scripts of 9.5 MB and up failed to boot reliably in testing. A static build ignores it.
     default: "8"
   startup-limit-ms:
-    description: Fail when importing the server entry in a local Deno harness takes longer than this. Only runs when `deno` is on the PATH.
+    description: Fail when importing the script in a local Deno harness takes longer than this. Only runs when `deno` is on the PATH. A static build ignores it.
     default: "500"
-  keep-stale-deploys:
-    description: Files no longer in `client-dir` are deleted from storage after this many deploys, so open tabs can still load old chunks.
+  keep-deploys:
+    description: Deploy folders to keep in the storage zone, newest first, as well as the live one. A kept folder is what a rollback returns to, whether the action does it after a failed smoke test or you do it by hand. Older folders are deleted after a deploy passes its smoke test.
     default: "3"
-  purge:
-    description: "`full` purges the whole zone after publishing. `targeted` purges changed unhashed files plus `cache-tag`, and is only correct when the app sets that tag with a CDN-Tag header on every rendered response."
-    default: full
-  cache-tag:
-    description: CDN-Tag value to purge in targeted mode.
-    default: ""
   smoke-route:
-    description: Server-rendered route requested by the smoke test after the deploy.
+    description: Route requested by the smoke test after the deploy. It must answer 2xx or 3xx, so a / that redirects to a language passes.
     default: /
   smoke-static-path:
-    description: Static file path requested by the smoke test. Defaults to the first hashed asset in `client-dir`.
+    description: Static file path requested by the smoke test, with or without a leading slash. Defaults to the first hashed asset in the assets dir, else its first file other than _headers and _redirects.
     default: ""
   concurrency:
-    description: Parallel storage uploads.
+    description: Parallel storage uploads, at least 1.
     default: "8"
   release-note:
-    description: Note stored on the published script release. Defaults to repository, commit and run number.
+    description: Note stored on the published script release. Defaults to repository, commit and run number. A static build ignores it.
     default: ""
+  github-environment:
+    description: "GitHub environment each deploy is recorded in, through the Deployments API, so the repository's Environments tab lists every deploy with its commit and a link to the site. Empty turns recording off. Needs `deployments: write`; without it the deploy logs a warning and goes ahead."
+    default: production
+  github-token:
+    description: Token used to record the deploy in `github-environment`.
+    default: ${{ github.token }}
 
 outputs:
   hostname:
     description: The pull zone system hostname, `<name>.b-cdn.net`.
   release:
-    description: UUID of the published script release, usable for rollback.
+    description: ID of the published script release. Publishing it again rolls back code and files together, while its deploy folder is kept. Empty for a static build.
+  deploy-id:
+    description: Content hash of this build; its client files are in `deploys/<deploy-id>/` in the storage zone.
   pull-zone-id:
     description: Bunny pull zone ID.
   storage-zone-id:
     description: Bunny storage zone ID.
   script-id:
-    description: Bunny edge script ID.
+    description: Bunny edge script ID. Empty for a static build.
 
 runs:
   using: node24

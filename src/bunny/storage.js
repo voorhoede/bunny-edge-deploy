@@ -29,22 +29,37 @@ export function createStorageClient({ hostname, zoneName, password, fetch = glob
     return response.json();
   }
 
+  async function listFolders(directory) {
+    try {
+      return (await listDirectory(directory)).filter((e) => e.IsDirectory).map((e) => ({ name: e.ObjectName, created: e.DateCreated }));
+    } catch (error) {
+      if (error.status === 404) return [];
+      throw error;
+    }
+  }
+
+  // Only the folder asked for may not exist yet; a missing subfolder that was just listed is an error.
   async function listAll(directory = "") {
     let entries;
     try {
       entries = await listDirectory(directory);
     } catch (error) {
-      if (directory === "" && error.status === 404) return [];
+      if (error.status === 404) return [];
       throw error;
     }
+    return filesIn(directory, entries);
+  }
+
+  async function filesIn(directory, entries) {
     const pathOf = (entry) => (directory ? `${directory}/${entry.ObjectName}` : entry.ObjectName);
     const files = entries.filter((e) => !e.IsDirectory).map((e) => ({ path: pathOf(e), size: e.Length, checksum: e.Checksum }));
-    for (const entry of entries.filter((e) => e.IsDirectory)) files.push(...(await listAll(pathOf(entry))));
+    for (const entry of entries.filter((e) => e.IsDirectory)) files.push(...(await filesIn(pathOf(entry), await listDirectory(pathOf(entry)))));
     return files;
   }
 
   return {
     listAll,
+    listFolders,
     upload: async (path, bytes, { contentType }) => {
       const checksum = createHash("sha256").update(bytes).digest("hex").toUpperCase();
       await send("PUT", path, { headers: { "Content-Type": contentType, Checksum: checksum }, body: bytes });
@@ -57,8 +72,8 @@ export function createStorageClient({ hostname, zoneName, password, fetch = glob
         throw error;
       }
     },
-    remove: async (path) => {
-      await send("DELETE", path);
+    removeFolder: async (path) => {
+      await send("DELETE", `${path}/`);
     },
   };
 }

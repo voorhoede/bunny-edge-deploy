@@ -77,6 +77,33 @@ describe("storage list", () => {
     assert.equal(calls[1].url, "https://storage.bunnycdn.com/site/assets/");
   });
 
+  it("treats a 404 on a folder that does not exist yet as empty", async () => {
+    const { client, calls } = storage([{ status: 404 }]);
+    assert.deepEqual(await client.listAll("deploys/689f0795086f"), []);
+    assert.equal(calls[0].url, "https://storage.bunnycdn.com/site/deploys/689f0795086f/");
+  });
+
+  it("lists the folders in one directory with the date each was created", async () => {
+    const { client, calls } = storage([{ json: [
+      { ObjectName: "aaaaaaaaaaaa", IsDirectory: true, DateCreated: "2026-09-30T08:33:59.427" },
+      { ObjectName: "stray.txt", IsDirectory: false, DateCreated: "2026-09-30T08:34:00.000" },
+      { ObjectName: "bbbbbbbbbbbb", IsDirectory: true, DateCreated: "2026-09-30T08:34:03.201" },
+    ] }]);
+    assert.deepEqual(await client.listFolders("deploys"), [{ name: "aaaaaaaaaaaa", created: "2026-09-30T08:33:59.427" }, { name: "bbbbbbbbbbbb", created: "2026-09-30T08:34:03.201" }]);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "https://storage.bunnycdn.com/site/deploys/");
+    const { client: empty } = storage([{ status: 404 }]);
+    assert.deepEqual(await empty.listFolders("deploys"), []);
+  });
+
+  it("fails when a folder it found in the listing answers 404, instead of leaving that folder's files out", async () => {
+    const { client } = storage([
+      { json: [{ ObjectName: "assets", IsDirectory: true, Length: 0, Checksum: null, Path: "/site/deploys/689f0795086f/" }] },
+      { status: 404 },
+    ]);
+    await assert.rejects(client.listAll("deploys/689f0795086f"), (error) => error.status === 404 && /deploys\/689f0795086f\/assets/.test(error.message));
+  });
+
   it("treats a 404 on the root as an empty zone", async () => {
     const { client } = storage([{ status: 404, json: [{ HttpCode: 404, Message: "Not found" }] }]);
     assert.deepEqual(await client.listAll(), []);
@@ -86,17 +113,17 @@ describe("storage list", () => {
 describe("storage download", () => {
   it("returns the bytes, or undefined when the file does not exist", async () => {
     const { client, calls } = storage([{ status: 200, text: "{}" }, { status: 404 }]);
-    assert.equal((await client.download("state.json")).toString(), "{}");
+    assert.equal((await client.download("deploys/689f0795086f/_headers")).toString(), "{}");
     assert.equal(calls[0].method, "GET");
     assert.equal(await client.download("missing.json"), undefined);
   });
 });
 
 describe("storage remove", () => {
-  it("DELETEs the file path", async () => {
+  it("DELETEs a folder and everything in it through its path with a trailing slash", async () => {
     const { client, calls } = storage([{ status: 200 }]);
-    await client.remove("assets/old.js");
+    await client.removeFolder("deploys/aaaaaaaaaaaa");
     assert.equal(calls[0].method, "DELETE");
-    assert.equal(calls[0].url, "https://storage.bunnycdn.com/site/assets/old.js");
+    assert.equal(calls[0].url, "https://storage.bunnycdn.com/site/deploys/aaaaaaaaaaaa/");
   });
 });
