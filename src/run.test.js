@@ -22,14 +22,14 @@ async function staticProject(files = {}) {
   return join(dir, ".bunny/build.json");
 }
 
-async function project({ env = requiredEnv, script = `import * as BunnySDK from "npm:@bunny.net/edgescript-sdk@0.12.1";\nBunnySDK.net.http.serve(async () => new Response("ok"));\n` } = {}) {
+async function project({ env = requiredEnv, type = "standalone", script = `import * as BunnySDK from "npm:@bunny.net/edgescript-sdk@0.12.1";\nBunnySDK.net.http.serve(async () => new Response("ok"));\n` } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "bed-run-"));
   await mkdir(join(dir, ".bunny"));
   await mkdir(join(dir, "dist/client/_astro"), { recursive: true });
   await writeFile(join(dir, "dist/client/index.html"), "<h1>");
   await writeFile(join(dir, "dist/client/_astro/app.DFbA8egk.css"), "css");
   await writeFile(join(dir, "dist/index.js"), script);
-  const manifest = { manifestVersion: 1, adapter: { package: "@bunny.net/astro-adapter" }, framework: { name: "astro" }, kind: "ssr", script: { entry: "dist/index.js", type: "standalone" }, assets: { dir: "dist/client" }, requires: { pullZone: { disableCookies: false, enableSmartCache: false }, env } };
+  const manifest = { manifestVersion: 1, adapter: { package: "@bunny.net/astro-adapter" }, framework: { name: "astro" }, kind: "ssr", script: { entry: "dist/index.js", type }, assets: { dir: "dist/client" }, requires: { pullZone: { disableCookies: false, enableSmartCache: false }, env } };
   await writeFile(join(dir, ".bunny/build.json"), JSON.stringify(manifest));
   return join(dir, ".bunny/build.json");
 }
@@ -43,10 +43,16 @@ function harness() {
     group: async (name, fn) => { lines.push(`group:${name}`); return fn(); }, setOutput: async (k, v) => { outputs[k] = v; }, summary: async (md) => lines.push(`summary:${md}`),
   };
   const deployments = [];
+  const probes = [];
+  const provisioned = { storageZone: { Id: 1, Name: "n", Password: "rw-pw", ReadOnlyPassword: "ro-pw", StorageHostname: "storage.bunnycdn.com" }, script: { Id: 2 }, pullZone: { Id: 3 }, hostname: "n.b-cdn.net", created: ["storage zone n"], updated: ["pull zone n: DisableCookies true -> false"], drift: [], warnings: [] };
   const deps = {
     provision: async (args) => {
       calls.push(["provision", { config: args.config, pullZoneRequirements: args.pullZoneRequirements }]);
-      return { storageZone: { Id: 1, Name: "n", Password: "rw-pw", ReadOnlyPassword: "ro-pw", StorageHostname: "storage.bunnycdn.com" }, script: { Id: 2 }, pullZone: { Id: 3 }, hostname: "n.b-cdn.net", created: ["storage zone n"], updated: ["pull zone n: DisableCookies true -> false"], drift: [], warnings: [] };
+      return provisioned;
+    },
+    provisionMiddleware: async (args) => {
+      calls.push(["provisionMiddleware", { config: args.config, pullZoneRequirements: args.pullZoneRequirements }]);
+      return provisioned;
     },
     deploy: async (args) => {
       calls.push(["deploy", { environment: args.environment, site: args.site, manifest: args.manifest, keepDeploys: args.keepDeploys }]);
@@ -60,7 +66,7 @@ function harness() {
       calls.push(["deployStatic", { manifest: args.manifest, storageZone: args.storageZone, keepDeploys: args.keepDeploys }]);
       return { deployId: "5e11111e1824", uploaded: ["index.html"], unchanged: [], pruned: [], confirmed: true, smoke: { checks: [], errors: [], warnings: [] } };
     },
-    probeScript: async () => ({ skipped: true, notice: "deno missing", errors: [] }),
+    probeScript: async (args) => { probes.push(args.type); return { skipped: true, notice: "deno missing", errors: [] }; },
     createBunnyApi: () => ({}),
     createStorageClient: () => ({}),
     openDeployment: async (args) => {
@@ -68,7 +74,7 @@ function harness() {
       return { succeed: async (result) => deployments.push(["succeed", result]), fail: async (message) => deployments.push(["fail", message]) };
     },
   };
-  return { actions, deps, calls, lines, outputs, deployments };
+  return { actions, deps, calls, lines, outputs, deployments, probes };
 }
 
 describe("run", () => {
@@ -227,5 +233,13 @@ describe("run", () => {
     assert.deepEqual(calls[0][1].config.replicationRegions, ["UK"]);
     assert.equal(calls[0][1].config.monthlyBandwidthLimit, 100 * 1000 ** 3);
     assert.equal(calls[1][1].site, "cdn-s");
+  });
+
+  it("provisions and deploys a middleware build, and probes it as one", async () => {
+    const path = await project({ type: "middleware" });
+    const { actions, deps, calls, probes } = harness();
+    await run({ inputs: { "build-manifest": path, "bunny-api-key": "key" }, actions, ...deps });
+    assert.deepEqual(probes, ["middleware"]);
+    assert.deepEqual(calls.map((c) => c[0]), ["provisionMiddleware", "deploy"]);
   });
 });

@@ -8,7 +8,7 @@ import { analyzeScript, probeScript as defaultProbeScript } from "./compat/scrip
 import { deploy as defaultDeploy, deployStatic as defaultDeployStatic } from "./deploy/deploy.js";
 import { openDeployment as defaultOpenDeployment } from "./github/deployments.js";
 import { PLATFORM_NAMES, platformEnvironment } from "./deploy/platform-env.js";
-import { provision as defaultProvision, provisionStatic as defaultProvisionStatic } from "./provision/provision.js";
+import { provision as defaultProvision, provisionMiddleware as defaultProvisionMiddleware, provisionStatic as defaultProvisionStatic } from "./provision/provision.js";
 import { readSiteConfig } from "./static-site/parse.js";
 import { analyzeSiteConfig } from "./static-site/rules.js";
 
@@ -41,7 +41,7 @@ export const INPUT_SCHEMA = {
 
 export async function run({
   inputs, actions, env = process.env,
-  provision = defaultProvision, deploy = defaultDeploy, probeScript = defaultProbeScript,
+  provision = defaultProvision, provisionMiddleware = defaultProvisionMiddleware, deploy = defaultDeploy, probeScript = defaultProbeScript,
   provisionStatic = defaultProvisionStatic, deployStatic = defaultDeployStatic,
   createBunnyApi = defaultCreateBunnyApi, createStorageClient = defaultCreateStorageClient, openDeployment = defaultOpenDeployment,
 }) {
@@ -53,7 +53,7 @@ export async function run({
 
   const record = await openDeployment({ env, token: options["github-token"], environment: options["github-environment"], warn: actions.warning });
   try {
-    const deployed = await deployBuild({ options, actions, env, environment, provision, deploy, probeScript, provisionStatic, deployStatic, createBunnyApi, createStorageClient });
+    const deployed = await deployBuild({ options, actions, env, environment, provision, provisionMiddleware, deploy, probeScript, provisionStatic, deployStatic, createBunnyApi, createStorageClient });
     await record?.succeed({ url: `https://${deployed.hostname}`, deployId: deployed.deployId });
     return deployed;
   } catch (error) {
@@ -62,7 +62,7 @@ export async function run({
   }
 }
 
-async function deployBuild({ options, actions, env, environment, provision, deploy, probeScript, provisionStatic, deployStatic, createBunnyApi, createStorageClient }) {
+async function deployBuild({ options, actions, env, environment, provision, provisionMiddleware, deploy, probeScript, provisionStatic, deployStatic, createBunnyApi, createStorageClient }) {
   const compat = await actions.group("Compatibility check", () => checkCompatibility({ options, environment, actions, probeScript }));
   if (compat.errors.length > 0) throw new Error(`compatibility check failed with ${compat.errors.length} problem(s)`);
   const { manifest } = compat;
@@ -84,7 +84,7 @@ async function deployBuild({ options, actions, env, environment, provision, depl
   const shared = { options, actions, env, config, api, manifest, compat, createStorageClient };
   return manifest.kind === "static"
     ? runStatic({ ...shared, provisionStatic, deployStatic })
-    : runServer({ ...shared, environment, provision, deploy });
+    : runServer({ ...shared, environment, provision: manifest.script.type === "middleware" ? provisionMiddleware : provision, deploy });
 }
 
 async function runServer({ options, env, actions, config, api, manifest, compat, environment, provision, deploy, createStorageClient }) {
@@ -183,7 +183,7 @@ async function checkCompatibility({ options, environment, actions, probeScript }
     const { manifest } = read;
     errors.push(...[...environment.variables, ...environment.secrets].filter((e) => PLATFORM_NAMES.has(e.name)).map((e) => `"${e.name}" is set by the action from the storage and pull zone; remove it from env and secrets`));
     const script = await analyzeScript({ path: manifest.script.entry, sizeLimit: options["script-size-limit-mb"] * 1024 * 1024 });
-    const probe = script.errors.length === 0 ? await probeScript({ path: manifest.script.entry, startupLimitMs: options["startup-limit-ms"] }) : { skipped: true, errors: [] };
+    const probe = script.errors.length === 0 ? await probeScript({ path: manifest.script.entry, startupLimitMs: options["startup-limit-ms"], type: manifest.script.type }) : { skipped: true, errors: [] };
     const client = await analyzeAssetsDir({ path: manifest.assets.dir });
     errors.push(...script.errors, ...probe.errors, ...client.errors);
     warnings.push(...script.warnings, ...client.warnings);

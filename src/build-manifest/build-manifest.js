@@ -58,8 +58,7 @@ function validate(raw) {
   if (raw.kind === "ssr" && raw.script === undefined) errors.push("build manifest has kind \"ssr\" but no script to run it");
   else if (raw.kind === "ssr") {
     expect(isString(raw.script.entry), "script.entry", "a string");
-    if (raw.script.type === "middleware") errors.push('build manifest script.type is "middleware", but this action deploys a "standalone" script');
-    else expect(raw.script.type === "standalone", "script.type", '"standalone"');
+    expect(raw.script.type === "standalone" || raw.script.type === "middleware", "script.type", '"standalone" or "middleware"');
   }
   const requires = raw.requires ?? {};
   for (const key of PULL_ZONE_SETTINGS) expect(isBoolean(requires.pullZone?.[key]), `requires.pullZone.${key}`, "a boolean");

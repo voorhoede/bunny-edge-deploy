@@ -98,7 +98,7 @@ describe("probeScript runtime probe", () => {
     const result = await probeScript({ path: await entryFile(source), startupLimitMs: 500 });
     assert.equal(result.skipped, false);
     assert.ok(result.importMs >= 0 && result.importMs < 500);
-    assert.deepEqual(result.registered, { serve: 1 });
+    assert.deepEqual(result.registered, { serve: 1, onOriginRequest: 0, onOriginResponse: 0 });
     assert.deepEqual(result.errors, []);
   });
 
@@ -113,6 +113,22 @@ describe("probeScript runtime probe", () => {
     assert.match(result.errors[0], /boom/);
     const middleware = await probeScript({ path: await entryFile(`globalThis.Bunny.v1.registerMiddlewares({ onOriginRequest: [async (ctx) => ctx.request], onOriginResponse: [] });`), startupLimitMs: 500 });
     assert.match(middleware.errors[0], /no request handler.*serve/);
+  });
+
+  it("expects origin hooks and no request handler from a middleware script", { skip: !denoAvailable }, async () => {
+    const middleware = `globalThis.Bunny.v1.registerMiddlewares({ onOriginRequest: [async (ctx) => ctx.request], onOriginResponse: [async (ctx) => ctx.response] });`;
+    const passes = await probeScript({ path: await entryFile(middleware), startupLimitMs: 500, type: "middleware" });
+    assert.deepEqual(passes.errors, []);
+    assert.deepEqual(passes.registered, { serve: 0, onOriginRequest: 1, onOriginResponse: 1 });
+    const standalone = await probeScript({ path: await entryFile(`globalThis.Bunny.v1.serve(() => new Response("hi"));`), startupLimitMs: 500, type: "middleware" });
+    assert.match(standalone.errors[0], /no origin middleware.*servePullZone/);
+  });
+
+  it("counts the hooks the SDK pushes after registering, as servePullZone does", { skip: !denoAvailable }, async () => {
+    const source = `const request = [], response = []; globalThis.Bunny.v1.registerMiddlewares({ onOriginRequest: request, onOriginResponse: response }); request.push(async (ctx) => ctx.request);`;
+    const result = await probeScript({ path: await entryFile(source), startupLimitMs: 500, type: "middleware" });
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.registered.onOriginRequest, 1);
   });
 
   it("errors when the script is CommonJS, which fails as soon as it is imported", { skip: !denoAvailable }, async () => {
