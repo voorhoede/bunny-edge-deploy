@@ -2,7 +2,7 @@
 
 GitHub Action that deploys a built website to [Bunny.net](https://bunny.net). It deploys what a Bunny framework adapter, such as [`@bunny.net/astro-adapter`](https://github.com/BunnyWay/bunny-adapters/tree/main/packages/astro), describes in `.bunny/build.json`:
 
-- **A server build** puts its client files in a Bunny Storage folder per deploy and runs its server bundle as a standalone Edge Script, which is the origin of a Bunny CDN pull zone.
+- **A server build** puts its client files in a Bunny Storage folder per deploy and runs its server bundle as an Edge Script behind a Bunny CDN pull zone: as the zone's origin (standalone), or as middleware in front of the storage zone, so files come from the nearest storage replica.
 - **A static build** is served straight from storage. Edge rules route to the current deploy and apply the build's `_headers` and `_redirects`.
 
 The action only deploys. Build first, then run it. It creates the Bunny resources on first use, keeps the settings the build needs in check, and deletes only what it created itself: old deploy folders and its own edge rules.

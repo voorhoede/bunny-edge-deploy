@@ -4,11 +4,12 @@ The action creates the storage zone, the pull zone and, for a server build, the 
 
 ## What the action checks and sets on every deploy
 
-**The origin.** A server build's pull zone must have its script as origin; a static build's pull zone must have its storage zone as origin. The origin is fixed when the zone is created, so a mismatch fails the run before anything is uploaded. Deploy a different kind of build under another `name` or `pull-zone-name`.
+**The origin.** A standalone script's pull zone must have that script as origin. A middleware script's pull zone must have the storage zone as origin and that script as its middleware. A static build's pull zone must have the storage zone as origin and no middleware. The origin is fixed when the zone is created, so a mismatch fails the run before anything is uploaded. Deploy a different kind of build under another `name` or `pull-zone-name`.
 
 **Settings the build needs.** If one differs, the action changes it back and logs the change:
 
-- Server build: Cache Expiration Time "Respect origin Cache-Control" (`CacheControlMaxAgeOverride` -1), plus whatever the manifest asks for in `requires.pullZone`. For Bunny's Astro adapter that is Disable Cookies off and Smart Cache off.
+- Server build: Cache Expiration Time "Respect origin Cache-Control" (`CacheControlMaxAgeOverride` -1), plus whatever the manifest asks for in `requires.pullZone`. For Bunny's Astro adapter that is Disable Cookies off and Smart Cache off, and for its middleware build also Cache Slicing off, since a sliced file reaches the visitor without its `ETag`.
+- Middleware build: the middleware runs after the cache, on misses only (`EdgeScriptExecutionPhase` 0).
 - Static build: the CDN keeps files for 30 days (`CacheControlMaxAgeOverride` 2592000) and browsers revalidate (`CacheControlPublicMaxAgeOverride` 0).
 
 **The 404 page** (static build). The storage zone's custom 404 path points at the live deploy's `404.html`, or is cleared when the build has none. It changes with every publish, and `Rewrite404To200` is set to false, so a missing path answers 404 even when the dashboard had a single-page fallback.
