@@ -1,7 +1,9 @@
-import { STATIC_CACHE_SETTINGS, desiredPullZoneSettings, desiredStaticPullZoneSettings, desiredStorageZone, requiredPullZoneSettings } from "./desired-state.js";
+import { MIDDLEWARE_SETTINGS, STATIC_CACHE_SETTINGS, desiredMiddlewarePullZoneSettings, desiredPullZoneSettings, desiredStaticPullZoneSettings, desiredStorageZone, requiredPullZoneSettings } from "./desired-state.js";
 
 const TIER_NAMES = ["standard", "edge"];
 const STANDALONE = 1;
+const MIDDLEWARE = 2;
+const SCRIPT_TYPE_NAMES = { [STANDALONE]: "standalone", [MIDDLEWARE]: "middleware" };
 const EDGE_SCRIPT_ORIGIN = 4;
 const STORAGE_ORIGIN = 2;
 
@@ -12,8 +14,22 @@ export async function provision({ api, config, pullZoneRequirements = {} }) {
   const warnings = [];
 
   const storageZone = await provisionStorageZone({ api, config, created, drift, warnings });
-  const script = await provisionScript({ api, config, created });
+  const script = await provisionScript({ api, config, scriptType: STANDALONE, created });
   const pullZone = await provisionPullZone({ api, config, script, pullZoneRequirements, created, updated });
+  const hostname = await forceHttps({ api, pullZone });
+
+  return { storageZone, script, pullZone, hostname, created, updated, drift, warnings };
+}
+
+export async function provisionMiddleware({ api, config, pullZoneRequirements = {} }) {
+  const created = [];
+  const updated = [];
+  const drift = [];
+  const warnings = [];
+
+  const storageZone = await provisionStorageZone({ api, config, created, drift, warnings });
+  const script = await provisionScript({ api, config, scriptType: MIDDLEWARE, created });
+  const pullZone = await provisionMiddlewarePullZone({ api, config, storageZone, script, pullZoneRequirements, created, updated });
   const hostname = await forceHttps({ api, pullZone });
 
   return { storageZone, script, pullZone, hostname, created, updated, drift, warnings };
@@ -50,13 +66,13 @@ async function provisionStorageZone({ api, config, created, drift, warnings }) {
   return zone.ReadOnlyPassword ? zone : api.storageZones.get(zone.Id);
 }
 
-async function provisionScript({ api, config, created }) {
+async function provisionScript({ api, config, scriptType, created }) {
   let script = await api.scripts.findByName(config.scriptName);
   if (!script) {
-    script = await api.scripts.create({ Name: config.scriptName, ScriptType: STANDALONE, CreateLinkedPullZone: false });
+    script = await api.scripts.create({ Name: config.scriptName, ScriptType: scriptType, CreateLinkedPullZone: false });
     created.push(`script ${config.scriptName}`);
-  } else if (script.ScriptType !== STANDALONE) {
-    throw new Error(`script "${config.scriptName}" exists but is not a standalone script (ScriptType ${script.ScriptType}), and a script's type cannot be changed; rename it or use another script-name`);
+  } else if (script.ScriptType !== scriptType) {
+    throw new Error(`script "${config.scriptName}" exists but is not a ${SCRIPT_TYPE_NAMES[scriptType]} script (ScriptType ${script.ScriptType}), and a script's type cannot be changed; rename it or use another script-name`);
   }
   return script;
 }
@@ -84,6 +100,38 @@ async function provisionPullZone({ api, config, script, pullZoneRequirements, cr
     throw new Error(`${name} runs script ${pullZone.EdgeScriptId} as its origin, not script ${script.Id} (${script.Name}); an origin is not repointed automatically, use another pull-zone-name`);
   }
   return applySettings({ api, config, pullZone, settings: requiredPullZoneSettings(pullZoneRequirements), updated });
+}
+
+async function provisionMiddlewarePullZone({ api, config, storageZone, script, pullZoneRequirements, created, updated }) {
+  const pullZone = await api.pullZones.findByName(config.pullZoneName);
+  if (!pullZone) {
+    const desired = desiredMiddlewarePullZoneSettings({
+      storageZoneId: storageZone.Id,
+      scriptId: script.Id,
+      requirements: pullZoneRequirements,
+      pricingTier: config.pricingTier,
+      pricingRegions: config.pricingRegions,
+      staleWhileUpdating: config.staleWhileUpdating,
+      monthlyBandwidthLimit: config.monthlyBandwidthLimit,
+    });
+    const createdZone = await api.pullZones.create({ Name: config.pullZoneName, ...desired });
+    created.push(`pull zone ${config.pullZoneName}`);
+    return createdZone;
+  }
+  const name = `pull zone "${config.pullZoneName}"`;
+  if (pullZone.OriginType !== STORAGE_ORIGIN) {
+    throw new Error(`${name} has another origin (OriginType ${pullZone.OriginType}), not storage zone ${storageZone.Id} (${storageZone.Name}); an origin is not repointed automatically, use another pull-zone-name`);
+  }
+  if (pullZone.StorageZoneId !== storageZone.Id) {
+    throw new Error(`${name} serves storage zone ${pullZone.StorageZoneId}, not ${storageZone.Id} (${storageZone.Name}); an origin is not repointed automatically, use another pull-zone-name`);
+  }
+  if (!pullZone.MiddlewareScriptId) {
+    throw new Error(`${name} has no middleware script, so it serves the storage zone as files; attach script ${script.Id} (${script.Name}) in the Bunny dashboard or use another pull-zone-name`);
+  }
+  if (pullZone.MiddlewareScriptId !== script.Id) {
+    throw new Error(`${name} runs middleware script ${pullZone.MiddlewareScriptId}, not script ${script.Id} (${script.Name}); a middleware is not swapped automatically, use another pull-zone-name`);
+  }
+  return applySettings({ api, config, pullZone, settings: { ...requiredPullZoneSettings(pullZoneRequirements), ...MIDDLEWARE_SETTINGS }, updated });
 }
 
 async function provisionStaticPullZone({ api, config, storageZone, created, updated }) {

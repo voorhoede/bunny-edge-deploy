@@ -1,5 +1,5 @@
 name: Bunny Edge Deploy
-description: Deploy the build a Bunny framework adapter describes in .bunny/build.json. Client files go to a Bunny Storage folder per deploy; a server build runs as a standalone edge script behind a CDN pull zone, a static build is served from storage by edge rules.
+description: Deploy the build a Bunny framework adapter describes in .bunny/build.json. Client files go to a Bunny Storage folder per deploy; a server build runs as an edge script behind a CDN pull zone, a static build is served from storage by edge rules.
 author: De Voorhoede
 branding:
   icon: upload-cloud

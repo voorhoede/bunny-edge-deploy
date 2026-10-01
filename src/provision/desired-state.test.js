@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { STATIC_CACHE_SETTINGS, desiredPullZoneSettings, desiredStaticPullZoneSettings, desiredStorageZone, requiredPullZoneSettings } from "./desired-state.js";
+import { STATIC_CACHE_SETTINGS, desiredMiddlewarePullZoneSettings, desiredPullZoneSettings, desiredStaticPullZoneSettings, desiredStorageZone, requiredPullZoneSettings } from "./desired-state.js";
 
 describe("desiredStorageZone", () => {
   it("defaults to Frankfurt, standard tier, no replication", () => {
@@ -100,5 +100,34 @@ describe("desiredStaticPullZoneSettings", () => {
       delete staticSite[key];
     }
     assert.deepEqual(staticSite, script);
+  });
+});
+
+describe("desiredMiddlewarePullZoneSettings", () => {
+  const settings = desiredMiddlewarePullZoneSettings({ storageZoneId: 11, scriptId: 22, requirements: { disableCookies: false, enableCacheSlice: true } });
+
+  it("serves the storage zone, with the script attached as middleware after the cache", () => {
+    assert.equal(settings.OriginType, 2);
+    assert.equal(settings.StorageZoneId, 11);
+    assert.equal(settings.MiddlewareScriptId, 22);
+    assert.equal(settings.EdgeScriptExecutionPhase, 0);
+    assert.equal("EdgeScriptId" in settings, false);
+  });
+
+  it("follows the script's Cache-Control, and takes the settings the build requires", () => {
+    assert.equal(settings.CacheControlMaxAgeOverride, -1);
+    assert.equal(settings.CacheControlPublicMaxAgeOverride, -1);
+    assert.equal(settings.DisableCookies, false);
+    assert.equal(settings.EnableCacheSlice, true);
+  });
+
+  it("shares every other default with a zone that runs a standalone script", () => {
+    const standalone = desiredPullZoneSettings({ scriptId: 22, pricingRegions: ["EU", "US"] });
+    const middleware = desiredMiddlewarePullZoneSettings({ storageZoneId: 11, scriptId: 22, pricingRegions: ["EU", "US"] });
+    for (const key of ["OriginType", "EdgeScriptId", "StorageZoneId", "MiddlewareScriptId", "EdgeScriptExecutionPhase"]) {
+      delete standalone[key];
+      delete middleware[key];
+    }
+    assert.deepEqual(middleware, standalone);
   });
 });

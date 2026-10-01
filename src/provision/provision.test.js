@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { provision, provisionStatic } from "./provision.js";
+import { provision, provisionMiddleware, provisionStatic } from "./provision.js";
 
 function fakeApi({ storageZone, pullZone, script, storageZoneById } = {}) {
   const calls = [];
@@ -152,5 +152,57 @@ describe("provisionStatic", () => {
     await assert.rejects(provisionStatic({ api, config }), /origin.*not storage zone 11/);
     const { api: other } = fakeApi({ storageZone, pullZone: { ...staticZone, StorageZoneId: 99 } });
     await assert.rejects(provisionStatic({ api: other, config }), /storage zone 99/);
+  });
+});
+
+describe("provisionMiddleware", () => {
+  const storageZone = { Id: 11, Name: "site", Region: "DE", ZoneTier: 0, ReplicationRegions: [], Password: "pw", ReadOnlyPassword: "ro", StorageHostname: "storage.bunnycdn.com" };
+  const script = { Id: 22, Name: "site", ScriptType: 2 };
+  const middlewareZone = { Id: 33, Name: "site", OriginType: 2, StorageZoneId: 11, MiddlewareScriptId: 22, EdgeScriptExecutionPhase: 0, CacheControlMaxAgeOverride: -1, DisableCookies: false, EnableSmartCache: false, Hostnames: [{ Value: "site.b-cdn.net", ForceSSL: true, IsSystemHostname: true }] };
+
+  it("creates a middleware script and a pull zone that serves the storage zone with it attached", async () => {
+    const { api, calls, names } = fakeApi();
+    const result = await provisionMiddleware({ api, config, pullZoneRequirements });
+    assert.deepEqual(names("").filter((n) => n.includes("create")), ["storageZones.create", "scripts.create", "pullZones.create"]);
+    assert.deepEqual(calls.find((c) => c[0] === "scripts.create")[1], { Name: "site", ScriptType: 2, CreateLinkedPullZone: false });
+    const create = calls.find((c) => c[0] === "pullZones.create")[1];
+    assert.equal(create.OriginType, 2);
+    assert.equal(create.StorageZoneId, 11);
+    assert.equal(create.MiddlewareScriptId, 22);
+    assert.equal(create.EdgeScriptExecutionPhase, 0);
+    assert.equal(create.CacheControlMaxAgeOverride, -1);
+    assert.equal(result.hostname, "site.b-cdn.net");
+  });
+
+  it("changes nothing on a zone already set up this way", async () => {
+    const { api, names } = fakeApi({ storageZone, script, pullZone: middlewareZone });
+    const result = await provisionMiddleware({ api, config, pullZoneRequirements });
+    assert.deepEqual(names("").filter((n) => /create|update/.test(n)), []);
+    assert.deepEqual(result.updated, []);
+  });
+
+  it("sets the cache settings and the execution phase back when they were changed", async () => {
+    const { api, calls } = fakeApi({ storageZone, script, pullZone: { ...middlewareZone, CacheControlMaxAgeOverride: 2592000, EdgeScriptExecutionPhase: 2, EnableSmartCache: true } });
+    const result = await provisionMiddleware({ api, config, pullZoneRequirements });
+    assert.deepEqual(calls.filter((c) => c[0] === "pullZones.update").map((c) => c.slice(1)), [[33, { CacheControlMaxAgeOverride: -1, EdgeScriptExecutionPhase: 0, EnableSmartCache: false }]]);
+    assert.equal(result.updated.length, 3);
+  });
+
+  it("fails when the script that carries the name is standalone, since a script's type is fixed", async () => {
+    const { api } = fakeApi({ storageZone, script: { ...script, ScriptType: 1 } });
+    await assert.rejects(provisionMiddleware({ api, config, pullZoneRequirements }), /"site" .*not a middleware script/);
+  });
+
+  it("fails on a zone with another origin, another storage zone, another middleware or none, instead of changing it", async () => {
+    const cases = [
+      [{ OriginType: 4, StorageZoneId: -1, EdgeScriptId: 22 }, /another origin/],
+      [{ StorageZoneId: 99 }, /storage zone 99/],
+      [{ MiddlewareScriptId: 99 }, /middleware script 99/],
+      [{ MiddlewareScriptId: null }, /no middleware script/],
+    ];
+    for (const [change, message] of cases) {
+      const { api } = fakeApi({ storageZone, script, pullZone: { ...middlewareZone, ...change } });
+      await assert.rejects(provisionMiddleware({ api, config, pullZoneRequirements }), message);
+    }
   });
 });

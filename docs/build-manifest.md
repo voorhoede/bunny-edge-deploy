@@ -8,7 +8,7 @@ The action deploys what a Bunny framework adapter describes in `.bunny/build.jso
 | --- | --- |
 | `manifestVersion` | Must be 1. A newer version fails the run, since its meaning may have changed. |
 | `kind` | `"ssr"` deploys a script, `"static"` deploys files only. |
-| `script.entry`, `script.type` | Server builds only. The type must be `"standalone"`. |
+| `script.entry`, `script.type` | Server builds only. The type is `"standalone"` or `"middleware"` ([The script](#the-script)). |
 | `assets.dir` | The client files, uploaded to `deploys/<deploy id>/` in the storage zone. |
 | `requires.pullZone` | Server builds only. `disableCookies`, `enableSmartCache` and `enableCacheSlice`, set on the pull zone on every deploy. |
 | `requires.storage.write` | Server builds only. Whether the script gets the storage password that can write (sessions). |
@@ -20,7 +20,12 @@ The action deploys what a Bunny framework adapter describes in `.bunny/build.jso
 
 ### The script
 
-The script is deployed as the code of a **standalone** Edge Script, the origin of the pull zone. The action writes one line in front of it before uploading:
+`script.type` decides how the pull zone runs it:
+
+- **`standalone`**: the script is the pull zone's origin. Every cache miss, for a page or a file, goes through the script, which reads files from the storage zone's main region.
+- **`middleware`**: the storage zone is the pull zone's origin, and the script is attached as middleware that runs on cache misses. It renders the app's own routes and sends every other request on to storage, which serves it from the nearest replica.
+
+A script's type is fixed when it is created, so switching an existing site to the other type needs another `name` or `script-name` and `pull-zone-name`. The action writes one line in front of the script before uploading:
 
 ```js
 globalThis.__BUNNY_DEPLOY__ = {"id":"<deploy id>","assetPrefix":"deploys/<deploy id>","site":"<name>","environment":"production"};
@@ -50,7 +55,7 @@ Errors fail the workflow before anything is uploaded:
 - the script is missing, has a syntax error, or is larger than `script-size-limit-mb` (default 8 MB);
 - relative imports or bare package imports, since nothing but the one file is uploaded (`npm:`, `jsr:`, `http:` and `https:` specifiers resolve at run time);
 - `node:` modules that do not resolve on the runtime: child_process, cluster, constants, dgram, inspector, repl, sys, trace_events, tty, v8, vm, wasi, worker_threads;
-- when Deno is on the PATH: importing the script in a harness with a stubbed `Bunny` global throws, registers no `serve()` handler, or takes longer than `startup-limit-ms` (default 500 ms). This approximates Bunny's startup limit. The harness runs twice and times the second import, so downloading `npm:` imports does not count, and it stops after 120 s.
+- when Deno is on the PATH: importing the script in a harness with a stubbed `Bunny` global throws, registers no `serve()` handler (standalone) or no origin middleware (middleware), or takes longer than `startup-limit-ms` (default 500 ms). This approximates Bunny's startup limit. The harness runs twice and times the second import, so downloading `npm:` imports does not count, and it stops after 120 s.
 
 Warnings: a script larger than 2 MB (cold starts measured at 0.5 s and up), and `node:` modules not yet verified on the runtime (sea, sqlite, test).
 

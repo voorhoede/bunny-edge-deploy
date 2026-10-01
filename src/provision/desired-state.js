@@ -60,3 +60,19 @@ export const STATIC_CACHE_SETTINGS = { CacheControlMaxAgeOverride: 2592000, Cach
 export function desiredStaticPullZoneSettings({ storageZoneId, ...options }) {
   return { OriginType: 2, StorageZoneId: storageZoneId, ...commonPullZoneSettings(options), ...STATIC_CACHE_SETTINGS };
 }
+
+// Execution phase 0 runs the middleware on cache misses only, after the edge cache.
+export const MIDDLEWARE_SETTINGS = { EdgeScriptExecutionPhase: 0 };
+
+export function desiredMiddlewarePullZoneSettings({ storageZoneId, scriptId, requirements = {}, ...options }) {
+  return {
+    OriginType: 2,
+    StorageZoneId: storageZoneId,
+    MiddlewareScriptId: scriptId,
+    ...MIDDLEWARE_SETTINGS,
+    ...commonPullZoneSettings(options),
+    CacheControlMaxAgeOverride: -1,
+    CacheControlPublicMaxAgeOverride: -1,
+    ...requiredPullZoneSettings(requirements),
+  };
+}

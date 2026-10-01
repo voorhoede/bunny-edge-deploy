@@ -56,7 +56,7 @@ Everything that costs extra is off at creation. Opt in by changing the zone in t
 | Perma-Cache | Storage rates for the cache copy | Not available for storage origins. |
 | Origin Shield | Free | Extra hop; the origin is already Bunny. |
 | Permanent log storage | Storage rates | Logs are kept 3 days without it. |
-| Replication regions | $0.01/GB (standard) or $0.02/GB (edge) per region | Irreversible. Set `replication-regions` to opt in. |
+| Replication regions | $0.01/GB (standard) or $0.02/GB (edge) per region | Irreversible. Set `replication-regions` to opt in. Only a middleware or static build reads from a replica; a standalone script reads the main region. |
 | Volume pricing tier | $0.005/GB instead of $0.01/GB | Ten locations worldwide, none in the Netherlands (Frankfurt is nearest). Set `pricing-tier: volume`. |
 
 A server build also pays for Edge Scripting: $0.20 per million requests plus $0.02 per 1000 s CPU, $0.22 monthly minimum. Only cache misses reach the script.

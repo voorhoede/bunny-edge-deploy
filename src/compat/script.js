@@ -41,7 +41,7 @@ export async function analyzeScript({ path, sizeLimit, coldStartWarnSize = 2 * 1
   return { errors, warnings, size };
 }
 
-export async function probeScript({ path, startupLimitMs, deno = "deno", timeoutMs = 120_000 }) {
+export async function probeScript({ path, startupLimitMs, type = "standalone", deno = "deno", timeoutMs = 120_000 }) {
   const harness = fileURLToPath(new URL("./deno-harness.js", import.meta.url));
   const importOnce = () => run(deno, ["run", "--quiet", "--allow-all", "--node-modules-dir=none", "--no-lock", harness, path], { maxBuffer: 16 * 1024 * 1024, env: { ...process.env, NO_COLOR: "1" }, timeout: timeoutMs });
   let stdout;
@@ -60,7 +60,8 @@ export async function probeScript({ path, startupLimitMs, deno = "deno", timeout
   const result = JSON.parse(line);
   const errors = [];
   if (result.error) errors.push(`script failed to import in the Deno harness: ${result.error}`);
-  else if (!(result.registered.serve > 0)) errors.push("script registered no request handler when imported: expected a standalone script that calls serve() from @bunny.net/edgescript-sdk");
+  else if (type === "middleware" && result.registered.onOriginRequest + result.registered.onOriginResponse === 0) errors.push("script registered no origin middleware when imported: expected a middleware script that calls servePullZone() from @bunny.net/edgescript-sdk");
+  else if (type === "standalone" && !(result.registered.serve > 0)) errors.push("script registered no request handler when imported: expected a standalone script that calls serve() from @bunny.net/edgescript-sdk");
   if (result.importMs > startupLimitMs) errors.push(`script took ${Math.round(result.importMs)} ms to import in a local Deno harness, over the ${startupLimitMs} ms startup limit (an approximation of the Bunny runtime)`);
   return { skipped: false, importMs: result.importMs, registered: result.registered, errors };
 }

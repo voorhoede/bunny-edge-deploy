@@ -35,6 +35,36 @@ Sources: official OpenAPI specs (`https://core-api-public-docs.b-cdn.net/docs/v3
 - A script that was never published answers `GET /compute/script/{id}/releases/active` with 404 and an empty body, and `GET .../releases` with an empty `Items` list (script 93344, deleted).
 - `GET /pullzone/{id}` returns each edge rule with every field `addOrUpdate` was sent, unchanged (including an empty `ExtraActions`), plus `Guid`, `OrderIndex`, `ReadOnly`, a `Parameter1: ""` on each trigger and `null` for unsent action parameters (storage zone 1955945, pull zone 6717190, deleted).
 
+### Middleware on a storage-origin pull zone (2026-09-30, storage zone 1959253 with UK and NY replicas, middleware script 93368, standalone script 93369, pull zones 6720252, 6720253, 6720254, deleted)
+- `POST /pullzone {OriginType: 2, StorageZoneId, MiddlewareScriptId, EdgeScriptExecutionPhase: 0}` attaches a `ScriptType: 2` script at creation. A script that calls `Bunny.v1.registerMiddlewares` directly, with no SDK import, works.
+- A `Request` returned from `onOriginRequest` with a rewritten path reaches storage at that path: `/en/` rewritten to `/deploys/spike01/en/index.html` was served from there, and `onOriginResponse`'s `request.url` has the rewritten path. A visitor asking for `/deploys/spike01/...` gets it prefixed again and answers 404, so the zone is only reachable through what the middleware allows.
+- A storage-origin zone without middleware serves `/x/` and `/x` both from `x/index.html` with 200.
+- `onOriginResponse` sees storage's status (200, 404), `content-type` sniffed from the extension, and a weak `etag`; it saw 206 for an HTML page nobody asked a range of, which fits cache slicing (on by default on a storage-origin zone). A visitor's `If-None-Match` got 304. A visitor's `Range: bytes=0-99` on a 509 KB file got 200 with the whole file.
+- A middleware that throws gives the visitor 500 with an empty body and `cache-control: no-cache`; the request does not fall through to storage.
+- In `onOriginRequest`: `host` is the public hostname, `x-forwarded-for` the client IP, `cdn-requestcountrycode` set, `Bunny.v1.waitUntil` a function, and a variable and a secret are readable through `Deno.env.get`.
+- With `CacheControlMaxAgeOverride -1`: a short-circuit response with `public, max-age=60` was a HIT on the second request, and a `Cache-Control` set in `onOriginResponse` is what gets cached. A short-circuit response with no `Cache-Control` was served as `public, max-age=2592000` and cached.
+- Cache misses from Amsterdam, all through the Frankfurt PoP, 20 misses per path. Hit medians were 66 to 145 ms that run, slower than in earlier runs:
+
+  | File | Standalone script, median / p90 | Middleware, median / p90 | Storage, no script, median / p90 |
+  | --- | --- | --- | --- |
+  | 4.6 KB CSS | 105 / 151 ms | 111 / 211 ms | 82 / 381 ms |
+  | 509 KB JS | 187 / 807 ms | 210 / 534 ms | 155 / 287 ms |
+  | 31 KB HTML | 147 / 169 ms | 151 / 308 ms | 92 / 113 ms |
+
+  From Europe the middleware was no faster than a standalone script reading the Storage API. Replicas were not exercised, since every request went to the Frankfurt PoP next to the main region.
+- The same setup measured from a Bunny sandbox in New York (`bunny sandbox create --region NY`), all through the NY1 PoP, 20 misses per path, hits 29 to 39 ms (storage zone 1959265, scripts 93370 and 93371, pull zones 6720279 to 6720281, sandbox deleted afterwards):
+
+  | File | Standalone script, median / p90 | Middleware, median / p90 | Storage, no script, median / p90 |
+  | --- | --- | --- | --- |
+  | 4.6 KB CSS | 417 / 484 ms | 87 / 125 ms | 44 / 50 ms |
+  | 509 KB JS | 790 / 819 ms | 106 / 142 ms | 42 / 58 ms |
+  | 31 KB HTML | 418 / 468 ms | 84 / 104 ms | 41 / 53 ms |
+
+  A standalone script reads every miss from the main region, across the Atlantic here; a storage-origin zone read the NY replica. The middleware added about 45 ms to a miss. The sandbox runs in Bunny's own NY datacenter, next to the PoP and the replica, so these are best-case numbers for a visitor near New York.
+- In `onOriginRequest`, `request.url` names the storage origin (`http://storage.bunnycdn.com:9000/echo`), not the public hostname, for a GET and a POST alike; the public hostname is only in the `host` header, with `x-forwarded-proto: https`. Code that compares the visitor's `Origin` with the request URL, like Astro's cross-site POST check, refuses every POST unless the URL is rebuilt from `host` (2026-10-01, storage zone 1961052, script 93487, pull zone 6724128, deleted).
+- With cache slicing on (the storage-origin default), storage answers the zone 206 even for a 5-byte file, and the visitor gets no `ETag` although `onOriginResponse` passed storage's on; `If-None-Match` and `If-Modified-Since` then answer 200. With `EnableCacheSlice: false` storage answers 200, the visitor gets the `ETag`, `If-None-Match` gets 304, and a `Range: bytes=0-99` still gets 206 with that range, on a miss and a hit (same zones).
+- The Storage API only answers at the zone's main region: from New York, `storage.bunnycdn.com` returned the file in about 270 ms, while `ny.storage.bunnycdn.com` and `la.storage.bunnycdn.com` answered 401 with the zone's read-only password. A standalone script cannot read a replica.
+
 ### Loading an npm package at runtime instead of bundling it (2026-09-30, Shiki 4.4.3 behind `@bunny.net/astro-adapter`)
 - A script that keeps `import ... from "npm:shiki@4.4.3"` (plus `/langs`, `/engine/oniguruma` and a dynamic `import("npm:shiki@4.4.3/wasm")`) instead of bundling Shiki boots and highlights code on Bunny. Grammars that the package loads with dynamic imports were fetched on first use at request time (js, python, rust, go, ruby, sql all rendered). The script stayed at 2.95 MB, where bundling Shiki made it 12.85 MB.
 - The import runs when an isolate starts, so every route pays for it on a cold start: 15 requests to a cheap on-demand route took median 0.44 s and max 0.99 s, against median 0.27 s and max 0.30 s for the same site with Shiki left out.

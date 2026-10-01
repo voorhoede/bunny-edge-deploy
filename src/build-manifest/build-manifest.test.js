@@ -88,12 +88,19 @@ describe("readBuildManifest", () => {
     assert.deepEqual(manifest.requires, { pullZone: {}, storage: { write: false }, env: [] });
   });
 
-  it("refuses a server build without a script, and a script that is not standalone", async () => {
+  it("refuses a server build without a script, and a script type it does not know", async () => {
     const { script, ...rest } = astroManifest;
     const missing = await readBuildManifest((await project({ ...rest })).path);
     assert.match(missing.errors[0], /script/);
-    const middleware = await readBuildManifest((await project({ ...astroManifest, script: { ...script, type: "middleware" } })).path);
-    assert.match(middleware.errors[0], /middleware.*standalone/);
+    const unknown = await readBuildManifest((await project({ ...astroManifest, script: { ...script, type: "worker" } })).path);
+    assert.match(unknown.errors[0], /script\.type.*standalone.*middleware/);
+  });
+
+  it("reads a middleware script, for a pull zone whose origin is the storage zone", async () => {
+    const { path } = await project({ ...astroManifest, script: { ...astroManifest.script, type: "middleware" } });
+    const { errors, manifest } = await readBuildManifest(path);
+    assert.deepEqual(errors, []);
+    assert.equal(manifest.script.type, "middleware");
   });
 
   it("names every field that is missing or of the wrong type", async () => {
